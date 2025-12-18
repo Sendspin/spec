@@ -321,14 +321,14 @@ For the initial message, include all state fields. For subsequent updates, only 
 - `state`: 'synchronized' | 'error' | 'external_source' - operational state of the client
   - `'synchronized'` - client is operational and synchronized with server timestamps
   - `'error'` - client has a problem preventing normal operation (unable to keep up, clock sync issues, etc.)
-  - `'external_source'` - client is in use by an external system and cannot participate in Sendspin playback. See [External Source Handling](#external-source-handling)
+  - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
 ### External Source Handling
 
-When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and cannot participate in Sendspin playback.
+When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and is not currently participating in Sendspin playback with this server.
 
 #### Server behavior when `state` changes to `'external_source'`:
 
