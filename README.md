@@ -451,6 +451,8 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
 
+**PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
+
 ### Client → Server: `client/state` player object
 
 The `player` object in [`client/state`](#client--server-clientstate) has this structure:
