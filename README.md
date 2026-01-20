@@ -7,9 +7,8 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer). Every client has a unique identifier
+- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
-  - **Source** - captures audio from a local input and streams it to the server. May expose signal presence (line sensing/levels). A source can run on a standalone client device, or be implemented as a server-local (built-in) source exposed to controllers as a virtual source client.
   - **Controller** - controls the Sendspin group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
   - **Artwork** - displays artwork images. Has preferred format for images
@@ -27,7 +26,7 @@ All role names and versions not starting with `_` are reserved for future revisi
 
 ### Priority and Activation
 
-Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: ["player@v2", "player@v1", "source@v1"].
+Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
 
 The server activates one version per role family (e.g., one `player@vN`, one `controller@vN`)—the first match it implements from the client's list. The server reports activated roles in `active_roles`.
 
@@ -51,7 +50,7 @@ Sendspin Servers must support both methods described below.
 
 Clients announce their presence via mDNS using:
 - Service type: `_sendspin._tcp.local.`
-- Port: The port the Sendspin client is listening on (recommended: `8927`)
+- Port: The port the Sendspin client is listening on (recommended: `8928`)
 - TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
@@ -145,7 +144,7 @@ Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for
 - `000000xx` (0-3): Reserved for future use
 - `000001xx` (4-7): Player role
 - `000010xx` (8-11): Artwork role
-- `000011xx` (12-15): Source role (audio input)
+- `000011xx` (12-15): Reserved for a future role
 - `00010xxx` (16-23): Visualizer role
 - Roles 6-47 (IDs 24-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
@@ -172,7 +171,7 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 
 - Each client is responsible for maintaining synchronization with the server's timestamps
 - Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
-- When a client cannot maintain sync (e.g., buffer underrun), it should send the 'error' state via [`client/state`](#client--server-clientstate-player-object), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send the 'synchronized' state
+- When a client cannot maintain sync (e.g., buffer underrun), it should send `state: 'error'` via [`client/state`](#client--server-clientstate), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send `state: 'synchronized'`
 - The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
 - Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
@@ -189,8 +188,9 @@ sequenceDiagram
     Client->>Server: client/hello (roles and capabilities)
     Server->>Client: server/hello (server info, connection_reason)
 
+    Client->>Server: client/state (state: synchronized)
     alt Player role
-        Client->>Server: client/state (player: volume, muted, state)
+        Client->>Server: client/state (player: volume, muted)
     end
 
     loop Continuous clock sync
@@ -230,8 +230,8 @@ sequenceDiagram
         Client->>Server: client/command (controller: play/pause/volume/switch/etc)
     end
 
-    alt Player role state changes
-        Client->>Server: client/state (player state changes)
+    alt State changes
+        Client->>Server: client/state (state and/or player changes)
     end
 
     alt Server commands player
@@ -239,9 +239,6 @@ sequenceDiagram
     end
 
     Server->>Client: stream/end (ends all role streams)
-    alt Player role
-        Client->>Server: client/state (player idle state)
-    end
 
     alt Graceful disconnect
         Client->>Server: client/goodbye (reason)
@@ -270,13 +267,11 @@ Players that can output audio should have the role `player`.
 - `version`: integer (must be `1`) - version of the core message format that the Sendspin client implements (independent of role versions)
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
-  - source@v1 - captures/streams audio input to the server
   - `controller@v1` - controls the current Sendspin group
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
-- source@v1_support?: object - only if `source@v1` is listed ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 
@@ -317,23 +312,40 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 ### Client → Server: `client/state`
 
-Client sends state updates to the server. Contains role-specific state objects based on the client's supported roles (e.g., player and/or source).
+Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) for roles that report state (such as `player`), and whenever any state changes thereafter.
+Must be sent immediately after receiving [`server/hello`](#server--client-serverhello), and whenever any state changes thereafter.
 
 For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
 
+- `state`: 'synchronized' | 'error' | 'external_source' - operational state of the client
+  - `'synchronized'` - client is operational and synchronized with server timestamps
+  - `'error'` - client has a problem preventing normal operation (unable to keep up, clock sync issues, etc.)
+  - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
-- source?: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
+### External Source Handling
+
+When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and is not currently participating in Sendspin playback with this server.
+
+#### Server behavior when `state` changes to `'external_source'`:
+
+If the client is in a multi-client group:
+1. Remember the client's current group as its "previous group" (see [switch command cycle](#switch-command-cycle))
+2. Move the client to a new solo group (stopped)
+   - Send [`group/update`](#server--client-groupupdate) with the new group information
+   - Send [`stream/end`](#server--client-streamend) for all active streams
+
+If the client is already in a solo group:
+- Stop playback and send [`stream/end`](#server--client-streamend) for all active streams
 
 ### Client → Server: `client/command`
 
 Client sends commands to the server. Contains command objects based on the client's supported roles.
 
 - `controller?`: object - only if client has `controller` role ([see controller command object details](#client--server-clientcommand-controller-object))
-- source?: object - only if client has `source` role ([see source command object details](#client--server-clientcommand-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -345,7 +357,6 @@ Only include fields that have changed. The client will merge these updates into 
 
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
-- source?: object - only sent to clients with `source` role ([see source server state object details](#server--client-serverstate-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -354,7 +365,6 @@ Only include fields that have changed. The client will merge these updates into 
 Server sends commands to the client. Contains role-specific command objects.
 
 - `player?`: object - only sent to clients with `player` role ([see player command object details](#server--client-servercommand-player-object))
-- source?: object - only sent to clients with `source` role ([see source command object details](#server--client-servercommand-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -441,16 +451,17 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
 
+**PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
+
 ### Client → Server: `client/state` player object
 
 The `player` object in [`client/state`](#client--server-clientstate) has this structure:
 
-Informs the server of player state changes. Only for clients with the `player` role.
+Informs the server of player-specific state changes. Only for clients with the `player` role.
 
 State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or via device controls.
 
 - `player`: object
-  - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
   - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
 
@@ -515,13 +526,6 @@ Sources are intended to be simple:
 - optionally provide basic signal presence information (level / line sensing)
 - stream audio frames with timestamps
 
-Different kinds of inputs exist and have different activation semantics:
-
-- **Analog inputs** (e.g., AUX/line-in, turntable preamp) typically require a *local* action to start producing audio.
-  For these, the `signal` field (line sensing) is important to indicate whether the user has actually started playback.
-- **Digital inputs** (e.g., HDMI ARC, S/PDIF, Bluetooth receiver) may be continuously available or remotely startable.
-  For these, the server can start/stop capture more deterministically.
-
 A device may implement both `source` and `player` roles (e.g., a speaker with a local AUX input that can be forwarded into Sendspin).
 
 The server may also expose **built-in inputs** (e.g., a line-in on the server host, or an HDMI capture device connected to the server) as a **virtual source client**. Virtual sources participate in the same source selection and state model as regular source clients and appear in the controller `sources` list.
@@ -537,19 +541,14 @@ A source client uses the same clock synchronization mechanism as all clients. Bi
 The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `source@v1_support`: object
-  - `input_type`: 'analog' | 'digital' - type of physical/logical input
-    - `analog` - a line-level style input where audio presence depends on local physical playback
-    - `digital` - a digital input where audio is typically continuous or remotely startable
-  - `activation`: 'manual' | 'remote' | 'always_on' - how capture is expected to be controlled
-    - `manual` - the source cannot be meaningfully started remotely (e.g., turntable). Use `signal` to indicate presence.
-    - `remote` - the server can start/stop capture (and optionally the external system) predictably.
-    - `always_on` - capture is continuously available; `server/command` start/stop may be ignored.
   - `format`: object - capture/encode format used by this source
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
     - `bit_depth`: integer - bit depth (e.g., 16, 24)
-  - `features?`: string[] - optional subset of: 'level', 'line_sense'
+  - `features?`: object - optional feature hints
+    - `level?`: boolean - true if source reports `level`
+    - `line_sense?`: boolean - true if source reports `signal`
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
 **Note:** The source chooses a single `format` to keep implementations simple. The server may still request a different `format` via `server/command` if both sides support it.
@@ -564,15 +563,16 @@ Example `client/hello` excerpt:
     "version": 1,
     "supported_roles": ["source@v1"],
     "source@v1_support": {
-      "input_type": "analog",
-      "activation": "manual",
       "format": {
         "codec": "opus",
         "channels": 2,
         "sample_rate": 48000,
         "bit_depth": 16
       },
-      "features": ["line_sense", "level"]
+      "features": {
+        "line_sense": true,
+        "level": true
+      }
     }
   }
 }
@@ -586,7 +586,6 @@ The `source` object in [`client/state`](#client--server-clientstate) has this st
   - `state`: 'idle' | 'streaming' | 'error'
   - `level?`: number - optional normalized RMS/peak level (0.0-1.0), only if 'level' is supported
   - `signal?`: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
-  - `input_type?`: 'analog' | 'digital' - optional echo of `source@v1_support.input_type` for convenience
 
 Example `client/state` excerpt:
 ```json
@@ -604,17 +603,10 @@ Example `client/state` excerpt:
 
 ### Client → Server: `client/command` source object
 
-Source clients may send commands to inform the server about user-initiated capture actions (implementation-defined). Most deployments will rely on server-driven control via [`server/command`](#server--client-servercommand).
+Source clients may send commands to inform the server about user-initiated capture actions (implementation-defined).
 
 - `source`: object
   - `command`: 'started' | 'stopped'
-
-### Server → Client: `server/state` source object
-
-The server may send source-related state to source clients (e.g., selection and routing decisions).
-
-- `source`: object
-  - `selected?`: boolean - whether this source is currently selected by any group
 
 ### Server → Client: `server/command` source object
 
@@ -627,8 +619,6 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
     - `channels`: integer
     - `sample_rate`: integer
     - `bit_depth`: integer
-
-If `source@v1_support.activation` is `always_on`, the client may ignore `start`/`stop` and only use `format` as an optional hint.
 
 Example `server/command` to start capture:
 ```json
@@ -667,7 +657,7 @@ Control the group that's playing and switch groups. Only valid from clients with
   - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'select_source' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
-  - source_id?: string - only set if command is 'select_source'
+  - source_id?: string | null - only set if command is 'select_source' (null clears selection)
 
 #### Command behaviour
 
@@ -686,19 +676,6 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
 - 'select_source' - select an active source for the group. If the server requires it, it may start/stop the source stream and then begin playback of that source to the group.
 
-Example `select_source` command:
-```json
-{
-  "type": "client/command",
-  "payload": {
-    "controller": {
-      "command": "select_source",
-      "source_id": "kitchen-linein"
-    }
-  }
-}
-```
-
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
 
 1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of all player volumes)
@@ -716,6 +693,8 @@ This ensures that when setting group volume to 100%, all players will reach 100%
 **Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group.
 
 #### Switch command cycle
+
+**Previous group priority:** If the client is still in the solo group from its `'external_source'` transition, the `switch` command prioritizes rejoining the previous group.
 
 For clients **with** the `player` role, the cycle includes:
 1. Multi-client groups that are currently playing
@@ -737,13 +716,11 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - sources?: object[] - list of available/known sources on the server
     - id: string - stable identifier of the source (typically the source client_id)
     - name: string - friendly name
-    - input_type?: 'analog' | 'digital' - input type hint
-    - activation?: 'manual' | 'remote' | 'always_on' - activation hint
-    - state: 'available' | 'streaming' | 'unavailable'
+    - state: 'idle' | 'streaming' | 'error'
     - signal?: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence
     - selected?: boolean - whether this source is currently selected for this group
-
-The `sources` list may include both standalone source clients and server-local (virtual) sources.
+    - last_event?: 'started' | 'stopped' - last source event (optional)
+    - last_event_ts_us?: integer - server time in microseconds for last event (optional)
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
@@ -801,7 +778,7 @@ The `artwork@v1_support` object in [`client/hello`](#client--server-clienthello)
     - `media_width`: integer - max width in pixels
     - `media_height`: integer - max height in pixels
 
-**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 4), `channels[1]` is channel 1 (binary message type 5), etc.
+**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 8), `channels[1]` is channel 1 (binary message type 9), etc.
 
 **None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
 
