@@ -622,11 +622,9 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 - `source`: object
   - `command`: 'start' | 'stop'
-  - `format?`: object - optional requested format for the source stream
-    - `codec`: 'opus' | 'flac' | 'pcm'
-    - `channels`: integer
-    - `sample_rate`: integer
-    - `bit_depth`: integer
+  - `vad?`: object - optional VAD settings hint
+    - `threshold_db?`: number - signal threshold in dB
+    - `hold_ms?`: integer - hold time in milliseconds
 
 Example `server/command` to start capture:
 ```json
@@ -640,9 +638,51 @@ Example `server/command` to start capture:
 }
 ```
 
+### Client → Server: `input_stream/start`
+
+The `input_stream/start` message announces the active input stream format and provides any required codec header data.
+
+- `source`: object
+  - `codec`: 'opus' | 'flac' | 'pcm'
+  - `channels`: integer
+  - `sample_rate`: integer
+  - `bit_depth`: integer
+  - `codec_header?`: string - Base64 encoded codec header (required for Opus/FLAC)
+
+Example `input_stream/start`:
+```json
+{
+  "type": "input_stream/start",
+  "payload": {
+    "source": {
+      "codec": "flac",
+      "channels": 2,
+      "sample_rate": 48000,
+      "bit_depth": 16,
+      "codec_header": "BASE64..."
+    }
+  }
+}
+```
+
+### Server → Client: `input_stream/request-format`
+
+The server can request a different input stream format. Clients should respond by reconfiguring capture (if supported) and sending a new `input_stream/start` with the updated format and header.
+
+- `source`: object
+  - `codec?`: 'opus' | 'flac' | 'pcm'
+  - `channels?`: integer
+  - `sample_rate?`: integer
+  - `bit_depth?`: integer
+
+### Client → Server: `input_stream/end`
+
+The client ends the current input stream. After this message, no more source audio chunks should be sent until a new `input_stream/start`.
+
 ### Client → Server: Source Audio Chunks (Binary)
 
 Binary messages should be rejected by the server if the source is not in `state: 'streaming'`.
+Clients must send `input_stream/start` before the first audio chunk.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
