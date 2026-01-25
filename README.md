@@ -541,7 +541,7 @@ A source client uses the same clock synchronization mechanism as all clients. Bi
 The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `source@v1_support`: object
-  - `format`: object - capture/encode format used by this source
+  - `supported_formats`: object[] - list of supported capture/encode formats in priority order (first is preferred)
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
@@ -551,7 +551,7 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `line_sense?`: boolean - true if source reports `signal`
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
-**Note:** The source chooses a single `format` to keep implementations simple. The server may still request a different `format` via `server/command` if both sides support it.
+**Note:** Servers should offer only the `supported_formats` options and avoid requesting unsupported formats.
 
 Example `client/hello` excerpt:
 ```json
@@ -563,12 +563,20 @@ Example `client/hello` excerpt:
     "version": 1,
     "supported_roles": ["source@v1"],
     "source@v1_support": {
-      "format": {
-        "codec": "opus",
-        "channels": 2,
-        "sample_rate": 48000,
-        "bit_depth": 16
-      },
+      "supported_formats": [
+        {
+          "codec": "opus",
+          "channels": 2,
+          "sample_rate": 48000,
+          "bit_depth": 16
+        },
+        {
+          "codec": "pcm",
+          "channels": 2,
+          "sample_rate": 48000,
+          "bit_depth": 16
+        }
+      ],
       "features": {
         "line_sense": true,
         "level": true
@@ -642,6 +650,8 @@ Binary messages should be rejected by the server if the source is not in `state:
 
 The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). The server may resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
 
+**Note:** Source timestamps are derived from the client's clock offset and may show small discontinuities or drift (e.g., ADC clock variance). Server implementations should not assume perfectly continuous timestamps; the audio sample stream itself should remain continuous.
+
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
 
@@ -654,10 +664,9 @@ The `controller` object in [`client/command`](#client--server-clientcommand) has
 Control the group that's playing and switch groups. Only valid from clients with the `controller` role.
 
 - `controller`: object
-  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'select_source' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
+  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
-  - source_id?: string | null - only set if command is 'select_source' (null clears selection)
 
 #### Command behaviour
 
@@ -674,7 +683,6 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'shuffle' - randomize playback order
 - 'unshuffle' - restore original playback order
 - 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
-- 'select_source' - select an active source for the group. If the server requires it, it may start/stop the source stream and then begin playback of that source to the group.
 
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
 
@@ -710,7 +718,7 @@ For clients **without** the `player` role, the cycle includes:
 The `controller` object in [`server/state`](#server--client-serverstate) has this structure:
 
 - `controller`: object
-  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'select_source'
+  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
   - sources?: object[] - list of available/known sources on the server
