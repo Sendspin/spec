@@ -1173,6 +1173,10 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 
 Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
+Clients choose which codecs to list in `supported_formats`; no codec is mandatory for a client. Clients SHOULD list `pcm`, and SHOULD list `flac` where a decoder fits the hardware. Using `opus` in a commercial client or server implementation may involve patent license fees; to avoid them, do not list `opus`.
+
+**Note:** Patent holders operate a licensing pool for Opus that charges per device that decodes it, independently of Sendspin. FLAC and PCM carry no known patent encumbrance, and on a local network the bandwidth saving of Opus over FLAC rarely matters. Open-source software is not the pool's stated target, but vendors shipping Opus in a product should take their own licensing view.
+
 For each [`stream/start`](#server--client-streamstart) the server SHOULD select the [`format`](#client--server-clientstate-player-object) the player's state currently prefers when one is set and the server can produce it for the current track, and otherwise the highest-priority `supported_formats` entry it can produce. It MAY select a different entry when warranted, for example to match a track's native sample rate and avoid resampling or to apply an operator-configured format, and MAY switch formats on a later track by sending a new `stream/start`.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
@@ -1349,6 +1353,10 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `line_sense?`: boolean - true if source reports `signal`
 
 Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
+
+Sources choose the codec they announce in `client-stream/start`; no codec is mandatory for a source. Sources SHOULD announce `pcm` or `flac`. Using `opus` in a commercial client or server implementation may involve patent license fees; to avoid them, do not announce `opus`.
+
+**Note:** Patent holders operate a licensing pool for Opus that charges per device that encodes it, independently of Sendspin. FLAC and PCM carry no known patent encumbrance, and on a local network the bandwidth saving of Opus over FLAC rarely matters. Open-source software is not the pool's stated target, but vendors shipping Opus in a product should take their own licensing view.
 
 A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); there is no pre-negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept whatever format a source announces.
 
