@@ -1191,7 +1191,7 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
-  - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
+  - `buffer_capacity`: integer - maximum total size in bytes of outstanding audio chunks, as defined in [Player Buffer Accounting](#player-buffer-accounting)
 
 Servers MUST support the `flac` and `pcm` codecs and MAY support `opus`. Players MUST list either `flac` or `pcm` and MAY list both as entries in `supported_formats`, so that every server can serve them, and MAY list `opus` in addition. Players are not told which codecs a server supports; the server selects only among the formats it can produce, as described below.
 
@@ -1232,7 +1232,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
 
 **Supported commands:** `supported_commands` advertises settability, not reportability. It lists the commands the server MAY send, and a player MAY report `volume` or `muted` without offering the matching command: an amplifier with a physical volume knob reports the position it is set to but cannot be set remotely. Capability also cannot be inferred from field presence, since `output_delay_ms` is never optional, whether or not `set_output_delay` is offered. A server MUST NOT treat a reported `volume` or `muted` as settable while the matching command is absent from `supported_commands`, though it MAY still surface the reported value as read-only.
 
-**Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST clamp `output_delay_ms` to the range 0-5000. Clients MUST persist `output_delay_ms` locally across reboots and server reconnections. Clients MAY update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
+**Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST clamp `output_delay_ms` to the range 0-5000. Clients MUST persist `output_delay_ms` locally across reboots and server reconnections. Clients MAY update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output. Decreasing `output_delay_ms` moves output later and can temporarily leave more audio buffered than `buffer_capacity`, because the server may already have sent audio using the previous delay. Clients MUST remain operational when handling this temporary excess. They MAY drop audio and resynchronize, and SHOULD avoid audible interruptions.
 
 **Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
 
@@ -1332,8 +1332,14 @@ Each client is responsible for maintaining its own synchronization with the serv
 - Especially for live streams, servers MUST schedule timestamps so each player's queued audio duration stays at or above its `min_buffer_ms`. `buffer_capacity` is a hard per-player byte cap and may reduce the effective queued duration below the requested `min_buffer_ms` when the negotiated codec's byte rate would otherwise exceed it.
 - When timing updates or joining players increase the required send-ahead during live playback, players MAY temporarily fall below their requested `min_buffer_ms`. The server SHOULD restore the requested minimum, subject to `buffer_capacity`.
 - For buffered streams, prefer filling each player's queue near `buffer_capacity` to maximize stability.
-- `buffer_capacity` is a hard per-player byte limit; servers MUST NOT send data that would cause a player's queued compressed audio to exceed this limit.
+- Servers MUST NOT send audio that would exceed `buffer_capacity` under the accounting rules below.
 - Servers MAY rate-limit, debounce, or coalesce a player's timing updates to prevent disruption from frequent or small changes.
+
+### Player Buffer Accounting
+
+Count only each audio chunk's 13-byte header and encoded payload. The server MUST NOT start sending a chunk if its full size plus the current count would exceed `buffer_capacity`. Count each chunk in full while transmission is unfinished or its completion time is in the future on the server's clock, regardless of decoding, partial playback, or discarded audio.
+
+To calculate completion time, convert the latest `output_delay_ms` received in `client/state` to microseconds and subtract it from the timestamp plus duration. Calculate duration in microseconds from decoded samples per channel and the sample rate under which the chunk was sent. The count starts empty. Sending a player `stream/clear` or `stream/end` resets it, removing previously sent chunks. A delay update recalculates completion times for all chunks sent since the last reset, including previously excluded chunks. An in-place `stream/start` does not reset the count or change earlier chunks' durations.
 
 ### Suggested correction strategy
 
