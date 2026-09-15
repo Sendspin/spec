@@ -2,33 +2,32 @@
 
 This file records when the mechanisms of the Sendspin protocol were first published in this repository, and the public prior art they build on. It exists so that anyone can establish, from the git history, what was public and when - for example to contest a later patent application that claims one of these mechanisms - and so that implementers can see that the protocol deliberately assembles long-published techniques.
 
-Everything in this repository has been public on GitHub since the first commit. Git commit dates are authoritative; the table below is a convenience index. Commits are in the `Sendspin/spec` repository at <https://github.com/Sendspin/spec>.
+Everything in this repository has been public on GitHub since the first commit. Commits are in the `Sendspin/spec` repository at <https://github.com/Sendspin/spec>. Git commit dates are set by the committer and are not proof on their own. GitHub's server-side timestamps corroborate them: each pull request cited below records when it was opened and merged, and the opening date is often the earlier public disclosure (#69, for example, was opened on 2026-02-26 and merged on 2026-06-01). Hashes are abbreviated; resolve them to full SHAs or GitHub commit URLs when citing. Independent snapshots of the repository, such as a Software Heritage archive, strengthen the record further where they exist. The table below is a convenience index.
 
 ## Publication timeline
 
-First appearance of each mechanism in the public repository (`git log --reverse -S<term>`; earlier commits may describe the same mechanism under a different name - the day-one specification already carried the three-timestamp time exchange and timestamped audio chunks).
+First appearance of each mechanism in the public repository (`git log --reverse -S<term>`). Where a mechanism was later renamed, the row cites the commit that introduced it under its original name and notes the rename; the day-one specification already carried the three-timestamp time exchange and timestamped audio chunks.
 
 | Mechanism | First commit | Date |
 |---|---|---|
 | Repository created; timestamped audio chunks; client/server time exchange with `server_received` / `server_transmitted`; per-client `buffer_capacity`; artwork role | `df40233`, `5d7252f`, `2bbe31a` | 2025-06-05 |
-| Visualizer role; `stream/request-format` per-client format negotiation | `9e42404` | 2025-09-15 |
-| `switch` command cycling a client through groups | `cac5e56` | 2025-09-17 |
+| Visualizer role; `stream/request-format` per-client format negotiation; group volume field; mDNS discovery with the `_resonate._tcp` and (from `bdc59c5`, 2025-09-22) `_resonate-server._tcp` service types, renamed `_sendspin._tcp` / `_sendspin-server._tcp` in `e1a3a88` (2025-12-04) | `9e42404` | 2025-09-15 |
+| `group/switch` command moving a client to another group | `cac5e56` | 2025-09-17 |
+| Kalman-filter clock offset and drift tracking recommended, with the time-filter library as reference implementation | `b26d14c` | 2025-11-17 |
+| `switch` command cycle through groups | `879d8b2` | 2025-11-17 |
 | Group volume model (delta, clamp, redistribute) | `4f2a0d6`, `5f98440` | 2025-11-17 / 2025-11-20 |
-| Kalman-filter clock offset and drift tracking named as the required method | `b26d14c` | 2025-11-17 |
-| `stream/clear` (seek and track-jump without ending the stream) | `cfef5c4` | 2025-12-01 |
-| mDNS service types `_sendspin._tcp` / `_sendspin-server._tcp`; server- and client-initiated connections | `e1a3a88` | 2025-12-04 |
+| `stream/flush` (seek and track-jump without ending the stream), renamed `stream/clear` in `cfef5c4` (2025-12-01) | `04bfc8c` | 2025-11-26 |
+| Perceived-loudness volume scale | `01a9e5b` | 2025-12-01 |
+| External-source handling (`state: 'external_source'` moves a client to a solo group; previous-group priority in the switch cycle), expressed as `available: false` since `e7cf66a` (2026-07-07) | `5cccacf` | 2025-12-12 |
+| `static_delay_ms` output-delay compensation, renamed `output_delay_ms` in `485617f` (2026-08-20) | `f686efa` | 2026-01-30 |
 | Color role (palette derived from artwork, scheduled by timestamp) | `a8f8f67`, `fad6e9c` | 2026-03-04 / 2026-04-15 |
-| Time-filter library referenced as the normative synchronization method | `0efbddb` | 2026-04-10 |
-| Noise `KKpsk2` encryption, pre-shared keys, Sentinel PSK, CPace pairing with commit-and-reveal (`commit_B`) | `131dc9b` | 2026-05-06 |
-| Spectrum configuration for the visualizer | `10cdfc6` | 2026-05-21 |
-| `required_lead_time_ms` | `133383e` | 2026-06-01 |
-| Unpaired access with operator approval | `d968604` | 2026-06-17 |
-| Source role (line-in captured, timestamped in the server clock domain); perceived-loudness volume curve; sample deletion/insertion correction strategy and sync accuracy requirements | `0f5a9b3`, `6453922`, `de382cd` | 2026-06-30 |
-| External-source handling (`available: false` moves a client to a solo group) | `e7cf66a` | 2026-07-07 |
-| Pairing token (base32, `SP:` prefix, QR) | `d9154c4` | 2026-07-29 |
-| Dynamic and static pairing code methods with pairing window and failure counter | `9a526a4` | 2026-08-18 |
-| `output_delay_ms` compensation | `485617f` | 2026-08-20 |
-| `client-stream/start` for source streams | `092ffb1` | 2026-08-24 |
+| Time-filter algorithm made the required synchronization method | `0efbddb` | 2026-04-10 |
+| Noise `KKpsk2` encryption, pre-shared keys, Sentinel PSK, CPace pairing with commit-and-reveal (`commit_B`), dynamic and static PIN methods with pairing window and failure counter (renamed pairing code in `9a526a4`, 2026-08-18), QR-code pairing | `131dc9b` | 2026-05-06 |
+| Unpaired playback on the Sentinel PSK (unpaired access; adjusted in `d968604`, operator approval flow in `e8f7a9e`, 2026-08-25) | `1c3bcec` | 2026-05-19 |
+| `visualizer@v1` role as specified today, with spectrum configuration | `10cdfc6` | 2026-05-21 |
+| `required_lead_time_ms` (pull request #69, opened 2026-02-26) | `133383e` | 2026-06-01 |
+| Source role (line-in captured, timestamped in the server clock domain) with `client_stream/start`, renamed `client-stream/start` in `092ffb1` (2026-08-24); volume-to-amplitude curve; sample deletion/insertion correction strategy and sync accuracy requirements | `0f5a9b3`, `6453922`, `de382cd` | 2026-06-30 |
+| Pairing token format (base32, `SP:` prefix) | `d9154c4` | 2026-07-29 |
 | `send_ahead` arrival-delay measurement | `bda23f3` | 2026-08-28 |
 
 ## Prior art the design builds on
