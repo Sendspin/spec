@@ -28,7 +28,7 @@ SPDX-License-Identifier: Community-Spec-1.0
 
 **2.1.3.2.	Non-Source Code Distributions.**  For distribution in any form other than source code, by including this License in the documentation, legal notices, via notice in the software, and/or other written materials provided with the Implementation; or
 
-**2.1.3.3.	Via Notices.md.**  By issuing pull request or commit to the Specification’s repository’s Notices.md file by the Implementer’s authorized representative, including the Implementer’s name, authorized individual and system identifier, and Specification version.
+**2.1.3.3.	Via NOTICES.md.**  By issuing pull request or commit to the Specification’s repository’s NOTICES.md file by the Implementer’s authorized representative, including the Implementer’s name, authorized individual and system identifier, and Specification version.
 
 **2.1.4.	Defensive Termination.**  If any Licensee files or maintains a claim in a court asserting that a Necessary Claim is infringed by an Implementation, any licenses granted under this License to the Licensee are immediately terminated unless 1) that claim is directly in response to a claim against Licensee regarding an Implementation, or 2) that claim was brought to enforce the terms of this License, including intervention in a third-party action by a Licensee.
 
@@ -40,7 +40,7 @@ SPDX-License-Identifier: Community-Spec-1.0
 
 This patent licensing commitment does not apply to those claims subject to Contributor’s Exclusion Notice under Section 3.
 
-**2.3.	Effect of Withdrawal.**  Contributor may withdraw from the Working Group by issuing a pull request or commit providing notice of withdrawal to the Working Group repository’s Notices.md file.  All of Contributor’s existing commitments and obligations with respect to the Working Group up to the date of that withdrawal notice will remain in effect, but no new obligations will be incurred.
+**2.3.	Effect of Withdrawal.**  Contributor may withdraw from the Working Group by issuing a pull request or commit providing notice of withdrawal to the Working Group repository’s NOTICES.md file.  All of Contributor’s existing commitments and obligations with respect to the Working Group up to the date of that withdrawal notice will remain in effect, but no new obligations will be incurred.
 
 **2.4.	Binding Encumbrance.**  This License is binding on any future owner, assignee, or party who has been given the right to enforce any Necessary Claims against third parties.
 
@@ -68,7 +68,7 @@ This patent licensing commitment does not apply to those claims subject to Contr
 
 **9.1.	Affiliate.** “Affiliate” means an entity that directly or indirectly Controls, is Controlled by, or is under common Control of that party.
 
-**9.2.	Approved Specification.**  “Approved Specification” means the final version and contents of any Draft Specification designated as an Approved Specification as set forth in the accompanying Governance.md file.
+**9.2.	Approved Specification.**  “Approved Specification” means the final version and contents of any Draft Specification designated as an Approved Specification as set forth in the accompanying GOVERNANCE.md file.
 
 **9.3.	Contribution.**  “Contribution” means any original work of authorship, including any modifications or additions to an existing work, that Contributor submits for inclusion in a Draft Specification, which is included in a Draft Specification or Approved Specification.
 
@@ -78,7 +78,7 @@ This patent licensing commitment does not apply to those claims subject to Contr
 
 **9.6.	Draft Specification.**  “Draft Specification” means all versions of the material (except an Approved Specification) developed by this Working Group for the purpose of creating, commenting on, revising, updating, modifying, or adding to any document that is to be considered for inclusion in the Approved Specification.
 
-**9.7.	Exclusion Notice.**  “Exclusion Notice” means a written notice made by making a pull request or commit to the repository’s Notices.md file that identifies patents that Contributor is excluding from its patent licensing commitments under this License.  The Exclusion Notice for issued patents and published applications must include the Draft Specification’s name, patent number(s) or title and application number(s), as the case may be, for each of the issued patent(s) or pending patent application(s) that the Contributor is excluding from the royalty-free licensing commitment set forth in this License.  If an issued patent or pending patent application that may contain Necessary Claims is not set forth in the Exclusion Notice, those Necessary Claims shall continue to be subject to the licensing commitments under this License.  The Exclusion Notice for unpublished patent applications must provide either: (i) the text of the filed application; or (ii) identification of the specific part(s) of the Draft Specification whose implementation makes the excluded claim a Necessary Claim.  If (ii) is chosen, the effect of the exclusion will be limited to the identified part(s) of the Draft Specification.
+**9.7.	Exclusion Notice.**  “Exclusion Notice” means a written notice made by making a pull request or commit to the repository’s NOTICES.md file that identifies patents that Contributor is excluding from its patent licensing commitments under this License.  The Exclusion Notice for issued patents and published applications must include the Draft Specification’s name, patent number(s) or title and application number(s), as the case may be, for each of the issued patent(s) or pending patent application(s) that the Contributor is excluding from the royalty-free licensing commitment set forth in this License.  If an issued patent or pending patent application that may contain Necessary Claims is not set forth in the Exclusion Notice, those Necessary Claims shall continue to be subject to the licensing commitments under this License.  The Exclusion Notice for unpublished patent applications must provide either: (i) the text of the filed application; or (ii) identification of the specific part(s) of the Draft Specification whose implementation makes the excluded claim a Necessary Claim.  If (ii) is chosen, the effect of the exclusion will be limited to the identified part(s) of the Draft Specification.
 
 **9.8.	Implementation.**  “Implementation” means making, using, selling, offering for sale, importing or distributing any implementation of the Specification 1) only to the extent it implements the Specification and 2) so long as all required portions of the Specification are implemented.
 
@@ -90,12 +90,14 @@ This patent licensing commitment does not apply to those claims subject to Contr
 
 **9.12.	Specification.**  “Specification” means a Draft Specification or Approved Specification included in the Working Group’s repository subject to this License, and the version of the Specification implemented by the Licensee.
 
-**9.13.	Scope.**  “Scope” has the meaning as set forth in the accompanying Scope.md file included in this Specification’s repository. Changes to Scope do not apply retroactively.  If no Scope is provided, each Contributor’s Necessary Claims are limited to that Contributor’s Contributions.
+**9.13.	Scope.**  “Scope” has the meaning as set forth in the accompanying SCOPE.md file included in this Specification’s repository. Changes to Scope do not apply retroactively.  If no Scope is provided, each Contributor’s Necessary Claims are limited to that Contributor’s Contributions.
 
 **9.14.	Working Group.**  “Working Group” means this project to develop specifications, standards, best practices, guidelines, and other similar materials under this License.
 
 
 
 *The text of this Community Specification License is Copyright 2020 Joint Development Foundation and is licensed under the Creative Commons Attribution 4.0 International License available at https://creativecommons.org/licenses/by/4.0/.*
+
+*File name references (NOTICES.md, GOVERNANCE.md, SCOPE.md) have been adapted to the file names used in this repository.*
 
 SPDX-License-Identifier: CC-BY-4.0
