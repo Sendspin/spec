@@ -6,13 +6,13 @@ Everything in this repository has been public on GitHub since the first commit. 
 
 ## Publication timeline
 
-First appearance of each mechanism in the public repository (`git log --reverse -S<term>`). Where a mechanism was later renamed, the row cites the commit that introduced it under its original name and notes the rename; the day-one specification already carried the three-timestamp time exchange and timestamped audio chunks.
+First appearance of each mechanism in the public repository (`git log --reverse -S<term>`). Where a mechanism was later renamed, the row cites the commit that introduced it under its original name and notes the rename; the day-one specification already carried the NTP-style four-timestamp time exchange (three timestamps on the wire, the fourth taken on receipt) and timestamped audio chunks.
 
 | Mechanism | First commit | Date |
 |---|---|---|
 | Repository created; timestamped audio chunks; client/server time exchange with `server_received` / `server_transmitted`; per-client `buffer_capacity`; artwork role | `df40233`, `5d7252f`, `2bbe31a` | 2025-06-05 |
 | Visualizer role; `stream/request-format` per-client format negotiation; group volume field; mDNS discovery with the `_resonate._tcp` and (from `bdc59c5`, 2025-09-22) `_resonate-server._tcp` service types, renamed `_sendspin._tcp` / `_sendspin-server._tcp` in `e1a3a88` (2025-12-04) | `9e42404` | 2025-09-15 |
-| `group/switch` command moving a client to another group | `cac5e56` | 2025-09-17 |
+| `group/switch` command moving a client to another group; moved to the controller role's `switch` command in `be30aba` (2025-10-10) | `cac5e56` | 2025-09-17 |
 | Kalman-filter clock offset and drift tracking recommended, with the time-filter library as reference implementation | `b26d14c` | 2025-11-17 |
 | `switch` command cycle through groups | `879d8b2` | 2025-11-17 |
 | Group volume model (delta, clamp, redistribute) | `4f2a0d6`, `5f98440` | 2025-11-17 / 2025-11-20 |
