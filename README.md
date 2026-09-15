@@ -280,7 +280,7 @@ A server-side failure decided from the cleartext [`client/init`](#client--server
 
 A `client/init` that parses as JSON of the message envelope and whose `version` is an integer other than `1` is `unsupported_version` regardless of its other payload fields, since a future version may define a different shape. Every other shape failure, including input that is not valid JSON, is `malformed`; `suite` is checked after `version`, then the remaining fields.
 
-Every other handshake-phase failure - a client-side rejection of `server/init`, a handshake timeout, a malformed inner `noise/handshake` payload, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, AEAD failure once in transport mode, or a cleartext frame received after switching to transport mode - is a **silent failure**: the detecting side closes the connection without sending any further message.
+Every other handshake-phase failure - a client-side rejection of `server/init`, a handshake timeout, a malformed inner `noise/handshake` payload, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, AEAD failure once in transport mode, or a cleartext message received after switching to transport mode - is a **silent failure**: the detecting side closes the connection without sending any further message.
 
 Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
