@@ -305,7 +305,7 @@ No other messages should be sent before the initial [`server/activate`](#server-
 
 Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are each sent as one complete WebSocket **text** message containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** messages carrying Noise transport ciphertexts.
 
-WebSocket messages may span multiple RFC 6455 frames, which are reassembled by the WebSocket layer before Sendspin processes them. This WebSocket fragmentation is distinct from Sendspin [fragmentation](#fragmentation).
+WebSocket messages may span multiple RFC 6455 frames. Sendspin operates only on complete WebSocket messages. This WebSocket fragmentation is distinct from Sendspin [fragmentation](#fragmentation).
 
 WebSocket control frames (Ping, Pong, Close; RFC 6455) are not Sendspin messages: they remain valid at any time, are not encrypted at the Noise layer, and Ping/Pong is the expected connection-liveness mechanism.
 
