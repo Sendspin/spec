@@ -12,9 +12,9 @@ The Sendspin Working Group is the group of people developing the Sendspin protoc
 
 ## Draft and Approved Specifications
 
-Everything on the `main` branch is a **Draft Specification** under the License. A version becomes an **Approved Specification** when the editors tag a release (for example `v1.0.0`).
+The specification is developed on the `main` branch and implementations may follow it. For the purposes of the License, `main` is the **Draft Specification**: contributors' patent licenses under Section 2.1.1.1 cover it as it stands at the time of each Contribution. A version becomes an **Approved Specification**, carrying the full patent commitment of Section 2 for its Scope, when the editors publish it as a release (for example `v1.0.0`). Releases give implementers and the partner program a fixed reference. Role versions (for example `player@v2`) are how the protocol evolves within the specification and are independent of releases; a release records which role versions exist at that time.
 
-Before a release is tagged, the editors open a pull request announcing the intended release and hold it open for at least 45 days. During that period a Contributor may file an Exclusion Notice in [NOTICES.md](NOTICES.md) as provided in Section 3.2 of the License. After the period closes, the release is tagged and the patent commitments under Section 2 of the License attach to that Approved Specification for its Scope.
+Before publishing a release, the editors open a pull request announcing it and hold it open for at least 45 days, mirroring the exclusion window of Section 3.1 of the License. During that period a Contributor may file an Exclusion Notice in [NOTICES.md](NOTICES.md) as provided in Section 3.2 of the License. After the period closes, the release is tagged and published.
 
 ## Changes to this document
 

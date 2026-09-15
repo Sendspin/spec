@@ -11,4 +11,4 @@ Without such permission you may still:
 - state factually that a product implements the Sendspin protocol or is compatible with Sendspin, in plain text, without implying endorsement or certification;
 - refer to the protocol by name in documentation, source code, and discussion;
 - use the identifiers the specification defines, such as the mDNS service types `_sendspin._tcp` and `_sendspin-server._tcp`; they are part of the protocol, not a use of the mark;
-- use the name in the title of a non-commercial open-source project that implements the protocol, provided the project does not present itself as official or certified.
+- refer to the protocol in a project's name in a descriptive position, for example `Foo for Sendspin`, `Foo, a Sendspin player for Windows`, or `Sendspin-compatible Foo`; using the name as the project's own name (`Sendspin for Windows`, `Sendspin Player`) presents it as the protocol's own software and requires permission, whether or not the project is open source.
