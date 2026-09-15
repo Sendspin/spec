@@ -280,7 +280,7 @@ A server-side failure decided from the cleartext [`client/init`](#client--server
 
 A `client/init` that parses as JSON of the message envelope and whose `version` is an integer other than `1` is `unsupported_version` regardless of its other payload fields, since a future version may define a different shape. Every other shape failure, including input that is not valid JSON, is `malformed`; `suite` is checked after `version`, then the remaining fields.
 
-Every other handshake-phase failure - a client-side rejection of `server/init`, a handshake timeout, a malformed inner `noise/handshake` payload, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, AEAD failure once in transport mode, or a cleartext frame received after switching to transport mode - is a **silent failure**: the detecting side closes the connection without sending any further message.
+Every other handshake-phase failure - a client-side rejection of `server/init`, a handshake timeout, a malformed inner `noise/handshake` payload, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, AEAD failure once in transport mode, or a cleartext message received after switching to transport mode - is a **silent failure**: the detecting side closes the connection without sending any further message.
 
 Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
@@ -288,7 +288,7 @@ Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to recei
 
 The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
-The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
+The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary messages inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
 
 The server MUST NOT start new application messages after sending Noise message 1, nor the client after receiving it, except for the handshake and hello/activation exchange. This restriction ends when the server sends, or the client receives, the new `server/activate`.
 
@@ -302,14 +302,16 @@ Once the WebSocket connection is established, Client and Server perform an initi
 2. Server → Client: [`server/init`](#server--client-serverinit) (cleartext)
 3. Server → Client: [`noise/handshake`](#client--server-noisehandshake) - Noise message 1 (cleartext)
 4. Client → Server: [`noise/handshake`](#client--server-noisehandshake) - Noise message 2 (cleartext)
-5. Both sides switch to Noise transport mode. From this point, all Sendspin application data is sent as WebSocket binary frames whose payloads are Noise transport ciphertexts.
+5. Both sides switch to Noise transport mode. From this point, all Sendspin application data is sent as WebSocket binary messages whose payloads are Noise transport messages.
 6. Server → Client: [`server/hello`](#server--client-serverhello) (encrypted)
 7. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
 8. Server → Client: [`server/activate`](#server--client-serveractivate) (encrypted)
 
 No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives, except possibly [`client/goodbye`](#client--server-clientgoodbye), or [`server/error`](#server--client-servererror) sent in place of `server/init`. See [Encryption](#encryption) for cryptographic details.
 
-Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`, `server/error`) are sent as WebSocket **text** frames containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** frames carrying Noise transport ciphertexts.
+Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`, `server/error`) are each sent as one complete WebSocket **text** message containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** messages carrying Noise transport messages.
+
+WebSocket messages may span multiple RFC 6455 frames. Sendspin operates only on complete WebSocket messages. This WebSocket fragmentation is distinct from Sendspin [fragmentation](#fragmentation).
 
 WebSocket control frames (Ping, Pong, Close; RFC 6455) are not Sendspin messages: they remain valid at any time, are not encrypted at the Noise layer, and Ping/Pong is the expected connection-liveness mechanism.
 
@@ -348,11 +350,11 @@ Message format example:
 }
 ```
 
-WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each binary message is a Noise transport ciphertext; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
+WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each complete binary message carries exactly one Noise transport message; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
 ### Binary Message ID Structure
 
-The first byte of every binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
+The first byte of every decrypted binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
 | IDs | Assignment |
 |---|---|
@@ -372,9 +374,9 @@ Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24
 
 ### Fragmentation
 
-A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per frame is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary frames using the fragment message type.
+A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per Noise transport message is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary messages using the fragment message type.
 
-**Wire format** (inside the AEAD-protected plaintext of each fragment frame):
+**Wire format** (inside the AEAD-protected plaintext of each fragment message):
 
 - First fragment: `[1][flags][orig_type][data]`
 - Subsequent fragments: `[1][flags][data]`
@@ -385,13 +387,13 @@ The concatenated `data` from all fragments yields the original message's payload
 
 **Constraints:**
 
-- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other data frame in that direction, whether fragmented or not.
-- Senders should not fragment messages that fit in a single non-fragmented frame.
+- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other binary message in that direction, whether fragmented or not.
+- Senders should not fragment messages that fit in a single Noise transport message.
 - A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with the rest of the frame; on any other fragment, append the frame's data to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
 
-**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment data frame received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
+**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment binary message received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
 
 ## Clock Synchronization
 
@@ -452,9 +454,9 @@ The encrypted payload carried inside each Noise handshake message is a UTF-8 JSO
 
 A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a [silent failure](#failure-handling) and closes the WebSocket.
 
-After both handshake messages have been exchanged, both sides switch to Noise transport mode (all subsequent messages travel as the binary Noise-ciphertext frames described above).
+After both handshake messages have been exchanged, both sides switch to Noise transport mode (all subsequent messages travel as the binary messages described above).
 
-The same `noise/handshake` message is used for the in-band [re-handshake](#re-handshake): the two messages then travel as ordinary encrypted JSON messages (binary frames, message type `0`), not bare Noise bytes. Noise message 2 is still encrypted under the pre-re-handshake transport keys; the first frame each side sends after the handshake completes uses the new keys.
+The same `noise/handshake` message is used for the in-band [re-handshake](#re-handshake): the two messages then travel as ordinary encrypted JSON messages (binary messages, message type `0`), not bare Noise bytes. Noise message 2 is still encrypted under the pre-re-handshake transport keys; the first binary message each side sends after the handshake completes uses the new keys.
 
 ### Server → Client: `server/error`
 
@@ -467,14 +469,14 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 ### Server → Client: `server/hello`
 
-First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`).
+First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary message, message type `0`).
 
 - `name`: string - friendly name of the server
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 
 ### Client → Server: `client/hello`
 
-Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary frame, message type `0`). Contains information about the client's capabilities and roles.
+Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary message, message type `0`). Contains information about the client's capabilities and roles.
 
 Clients that can output audio should have the role `player`.
 
@@ -505,7 +507,7 @@ If a role version requires a support object, the server MUST NOT activate that v
 
 ### Server → Client: `server/activate`
 
-Declares the server's current purpose on this connection. Sent as an encrypted message (binary frame, message type `0`). May be re-sent any time to change the activity set.
+Declares the server's current purpose on this connection. Sent as an encrypted message (binary message, message type `0`). May be re-sent any time to change the activity set.
 
 - `activities`: ('playback' | 'pairing')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
