@@ -22,6 +22,8 @@ Clients with a usable out-channel (display, speaker, etc.) should offer `dynamic
 
 Each successful pairing produces a pairing record: the new [long-term PSK](README.md#definitions) persisted together with the server's `server_id`. The client MUST persist the new record, replacing any record it already holds for the server.
 
+The server persists the long-term PSK together with the client's `client_id`.
+
 A client MUST be able to store at least 5 pairing records; more is allowed. When a pairing completes at capacity, the client MUST evict an existing record so that the new record persists - a pairing never fails for lack of record storage. Which record is evicted is implementation-defined (for example, the least recently used), except that the client MUST NOT evict a record backing a currently-open connection, provisional or admitted; the client MUST cap its concurrently open paired connections below its record capacity (see [Multiple servers](connection.md#multiple-servers-server-initiated)) so an evictable record always exists.
 
 Eviction needs no wire signal. An evicted server's next handshake references a `psk_id` the client no longer holds and lands in the [Sentinel Fallback](connection.md#sentinel-fallback): the server receives an authenticated credential-mismatch signal and can offer its operator re-pairing.
@@ -32,17 +34,19 @@ Pairing and playback are mutually exclusive on a connection. When a server moves
 
 Each pairing `server/activate` admits one **pairing attempt**, in progress from its first pairing message - [`client/pair-init`](#client--server-clientpair-init) (pairing-code methods) or [`client/pair-finalize`](#client--server-clientpair-finalize) (Pairing PSK) - until success or [`pair/abort`](#client--server-pairabort). [`client/pair-pending`](#client--server-clientpair-pending) precedes an attempt and does not start it. The client bounds each attempt with an **attempt timeout** measured from its first message (recommended 2 minutes); on expiry it sends `pair/abort` with reason `attempt_timeout`.
 
-The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and reactivates roles via `active_roles`.
+The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and `active_roles`.
 
 The same `server/activate` can also end a pairing attempt without finalizing: sent in place of [`server/pair-finalize`](#server--client-serverpair-finalize), it persists nothing and discards any received PSK. A client that, after sending [`client/pair-finalize`](#client--server-clientpair-finalize), receives `server/activate` likewise persists nothing.
 
-After leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
+After sending `pair/abort` or leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the abort or leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
 A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt does not count against a [pairing window](#pairing-window), and counts toward the [round limit](#rounds) only when the code was already being emitted. A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
 
 ### Unpaired Access
 
 A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session is [unpaired](README.md#definitions). Whether a client admits unpaired access is governed by its `unpaired_access` setting: the default is the manufacturer's choice, changing it is a local client action (manufacturer-defined), and the current value is advertised in [`client/hello`](messaging.md#client--server-clienthello) as `unpaired_access.enabled`. A client that stops admitting unpaired access closes any connection relying on it with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'pairing_required'`.
+
+When unpaired access is enabled, the client MAY send [`client/goodbye`](messaging.md#client--server-clientgoodbye) with reason `'restart'` and close an existing unpaired connection so the next `client/hello` advertises the updated setting.
 
 On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](README.md#definitions): a server MUST NOT declare `'playback'` or activate roles on a Sentinel-keyed connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist, MUST be revocable by the operator, and MUST be discarded on a successful pairing. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](messaging.md#server--client-serveractivate). The server MAY hold the connection at empty `activities`, ready to activate roles once approved, or to enter pairing.
 
@@ -109,7 +113,7 @@ sequenceDiagram
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
     Note over Server: Operator picks dynamic pairing code
-    Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code})
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code, format: digits|qr_code})
     opt attempt held back
         Client->>Server: client/pair-pending
         Note over Client: Cooldown elapses or operator acts
@@ -269,7 +273,7 @@ The code-based pairing flows use **CPACE-X25519-SHA512** as the PAKE constructio
 Sendspin instantiates CPace's inputs as follows:
 
 - `PRS` - the pairing code as a byte string: the literal decimal digits as UTF-8 (e.g., `0x31 0x32 0x33 0x34 0x35 0x36 0x37 0x38` for the pairing code `"12345678"`), or in the `qr_code` emission format the raw 24-byte code.
-- `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` || `h` || `counter` || `round`. `h` is the Noise handshake hash (32 bytes, raw) available immediately after Noise transport mode begins; `counter` is the number of pairing [`server/activate`](messaging.md#server--client-serveractivate) messages sent since the last Noise handshake, encoded as a big-endian uint32 (4 bytes); `round` is the number of the [round](#rounds) within the attempt, 1 for the first - always 1 in the Static Pairing Code Flow - encoded as a big-endian uint32 (4 bytes).
+- `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` || `h` || `pairing_index` || `round`. `h` is the Noise handshake hash (32 bytes, raw) available immediately after Noise transport mode begins; `pairing_index` is the number of pairing [`server/activate`](messaging.md#server--client-serveractivate) messages sent since the last Noise handshake, encoded as a big-endian uint32 (4 bytes); `round` is the number of the [round](#rounds) within the attempt, 1 for the first - always 1 in the Static Pairing Code Flow - encoded as a big-endian uint32 (4 bytes).
 - `CI` - empty.
 - `ADa` - the UTF-8 bytes `"server"`.
 - `ADb` - the UTF-8 bytes `"client"`.

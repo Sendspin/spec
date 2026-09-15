@@ -11,9 +11,9 @@ Once the WebSocket connection is established, Client and Server perform an initi
 7. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
 8. Server → Client: [`server/activate`](#server--client-serveractivate) (encrypted)
 
-No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives, except possibly [`client/goodbye`](#client--server-clientgoodbye). See [Encryption](connection.md#encryption) for cryptographic details.
+No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives, except possibly [`client/goodbye`](#client--server-clientgoodbye), or [`server/error`](#server--client-servererror) sent in place of `server/init`. See [Encryption](connection.md#encryption) for cryptographic details.
 
-Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are each sent as one complete WebSocket **text** message containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** messages carrying Noise transport messages.
+Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`, `server/error`) are each sent as one complete WebSocket **text** message containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** messages carrying Noise transport messages.
 
 WebSocket messages may span multiple RFC 6455 frames. Sendspin operates only on complete WebSocket messages. This WebSocket fragmentation is distinct from Sendspin [fragmentation](#fragmentation).
 
@@ -25,7 +25,7 @@ All JSON messages have a `type` field identifying the message and a `payload` ob
 
 **Message type prefixes.** The prefix before the `/` in a message `type` identifies a group of messages. `client/` and `server/` name the sender. `stream/` groups the messages that control a binary channel from the server to the client, and `client-stream/` those that control a binary channel from the client to the server; the two kinds of channel are independent and have separate lifetimes. `group/`, `pair/`, and `noise/` name a subject. Only `client/`, `server/`, and `client-stream/` imply a direction; for every other prefix each message's definition gives it.
 
-**Forward compatibility.** Clients and servers MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients and servers MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](README.md#application-specific-roles) objects a message explicitly permits.
+**Forward compatibility.** Clients and servers MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients and servers MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](README.md#application-specific-roles) objects a message explicitly permits, or support objects in `client/hello` for advertised application-specific role versions (e.g., `player@_experimental_support`).
 
 Message format example:
 
@@ -156,11 +156,20 @@ The encrypted payload carried inside each Noise handshake message is a UTF-8 JSO
   - `psk_category`: 'lt' | 'pr' | 'sn' - the category the server is using the referenced PSK as: long-term, pairing, or Sentinel. A `psk_id` the client holds only under a different category is a lookup miss (see [Pre-Shared Key](connection.md#pre-shared-key)). The codes share one length, so the encrypted payload's length is independent of the category.
 - **Noise message 2 payload** (client → server): the empty object as the literal two bytes `{}` (not a zero-length Noise payload)
 
-A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a handshake failure and closes the WebSocket (see [Failure Handling](connection.md#failure-handling)).
+A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a [silent failure](connection.md#failure-handling) and closes the WebSocket.
 
 After both handshake messages have been exchanged, both sides switch to Noise transport mode (all subsequent messages travel as the binary messages described above).
 
 The same `noise/handshake` message is used for the in-band [re-handshake](connection.md#re-handshake): the two messages then travel as ordinary encrypted JSON messages (binary messages, message type `0`), not bare Noise bytes. Noise message 2 is still encrypted under the pre-re-handshake transport keys; the first binary message each side sends after the handshake completes uses the new keys.
+
+### Server → Client: `server/error`
+
+Sent by the server in place of [`server/init`](#server--client-serverinit) when it cannot accept the client's [`client/init`](#client--server-clientinit). The server closes the connection after sending. See [Failure Handling](connection.md#failure-handling).
+
+- `reason`: string - one of:
+  - `unsupported_version` - the client's `version` is not one the server implements
+  - `unsupported_suite` - the client's `suite` is not one the server implements
+  - `malformed` - `client/init` is not valid JSON of the defined shape
 
 ### Server → Client: `server/hello`
 
@@ -215,12 +224,12 @@ The activity sets the server may legitimately declare are constrained by which P
 | PSK matched | Allowed activity sets |
 |---|---|
 | [long-term PSK](README.md#definitions) | `[]` or `['playback']` |
-| [pairing PSK](README.md#definitions) | `['pairing']` |
+| [pairing PSK](README.md#definitions) | `[]` or `['pairing']` |
 | [Sentinel PSK](connection.md#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
 
 ¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired access](pairing.md#unpaired-access) enabled.
 
-`pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [pairing PSK](README.md#definitions). It MUST also be a method present in the client's [`supported_pair_methods`](#client--server-clienthello).
+When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [pairing PSK](README.md#definitions), and MUST be a method present in the client's [`supported_pair_methods`](#client--server-clienthello).
 
 **Playback-capable connections.** A connection is *playback-capable* when its `activities` extended with `'playback'` are an allowed set for the matched PSK; a connection already declaring `'playback'` is therefore playback-capable exactly when its `activities` are an allowed set. Only a playback-capable connection MAY carry a non-empty `active_roles`, and it may do so even when `'playback'` is not currently in `activities`. The client re-evaluates this constraint on every `server/activate` against the persisted `active_roles`: if a later activation changes `activities` so the connection is no longer playback-capable without explicitly sending `active_roles`, the persisted roles are treated as empty rather than the message rejected.
 
@@ -267,7 +276,7 @@ Every message MUST carry `available` and the full state of each role object it i
 
 - `available`: boolean - whether the client is available to participate in Sendspin playback
   - `true` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
-  - `false` - client's output is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
+  - `false` - the client is in use by an external system and will not yield to Sendspin on request. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](roles/player/v1.md#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](roles/source/v1.md#client--server-clientstate-source-object))
 - `artwork?`: object - only if client has `artwork` role ([see artwork state object details](roles/artwork/v1.md#client--server-clientstate-artwork-object))
@@ -277,19 +286,19 @@ Every message MUST carry `available` and the full state of each role object it i
 
 ### External Source Handling
 
-A client's output can be taken over by a non-Sendspin activity (playing other media, another protocol, an HDMI input, and so on). How it reports this depends on whether it will still yield its output back to Sendspin on request.
+A client can be taken over by a non-Sendspin activity (playing other media, another protocol, an HDMI input, and so on). How it reports this depends on whether it will still yield to Sendspin on request.
 
 #### Interruptible activity (client stays available)
 
-If the external activity can be interrupted by Sendspin playback at any time, the client SHOULD remain `available: true` so the server can take it over.
+If the external activity can be interrupted by Sendspin at any time, the client SHOULD remain `available: true` so the server can take it over.
 
 To stop taking part in its group's playback while performing non-Sendspin activity, a client MAY leave its current group with [`client/leave`](#client--server-clientleave). This is only needed while the group's `playback_state` is `'playing'`: a client in a stopped group keeps its grouping by staying, and later playback may still take it over.
 
 #### Non-interruptible activity (client becomes unavailable)
 
-When a client reports `available: false`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and will not participate in Sendspin playback with this server until it returns to `available: true`.
+When a client reports `available: false`, it indicates the client is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and will not participate in Sendspin playback with this server until it returns to `available: true`.
 
-A client SHOULD report `available: false` only while it will not yield its output to Sendspin, and SHOULD return to `available: true` as soon as it is again willing to be taken over.
+A client SHOULD report `available: false` only while it will not yield to Sendspin, and SHOULD return to `available: true` as soon as it is again willing to be taken over.
 
 #### Server behavior when a client becomes unavailable (`available: false`):
 
@@ -307,7 +316,7 @@ When a client returns to `available: true`, the server MUST NOT auto-rejoin it t
 
 ### Client → Server: `client/command`
 
-Client sends commands to the server. Contains command objects based on the client's supported roles.
+Client sends commands to the server. Contains command objects based on the client's active roles.
 
 - `controller?`: object - only if client has `controller` role ([see controller command object details](roles/controller/v1.md#client--server-clientcommand-controller-object))
 
@@ -328,6 +337,8 @@ Server sends state updates to the client. Contains role-specific state objects.
 Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged and any pending scheduled update in place. For the `metadata` and `color` objects, a future `timestamp` defers when the state takes effect (see scheduled updates for [`metadata`](roles/metadata/v1.md#scheduled-metadata-updates) and [`color`](roles/color/v1.md#scheduled-color-updates)).
 
 After a `server/activate` adds or re-adds a role that defines a `server/state` object, the server MUST promptly send a `server/state` containing that role's current state, or `null` if there is no state to provide.
+
+The server MUST promptly report changes to active roles' `server/state` objects. Scheduled updates taking effect and playback progress advancing as reported require no new message.
 
 The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry a past or present `timestamp` if the role object has one, so the client is brought up to date before any scheduled update follows.
 
@@ -392,6 +403,8 @@ Sending `stream/end` in these cases is explicitly prohibited because it signals 
 
 State update of the group this client is part of.
 
+The server MUST promptly send this message after the first `server/activate` on a connection and whenever any field listed below changes.
+
 Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
@@ -401,6 +414,8 @@ Every message MUST carry all fields listed below.
 ### Server → Client: `server/unpair`
 
 Sent by a paired server to drop its own pairing record from the client. Valid at any time regardless of the current `activities`. No payload fields.
+
+The server also removes its corresponding pairing record.
 
 Client behavior:
 

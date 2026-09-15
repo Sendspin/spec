@@ -135,7 +135,7 @@ This mechanism only detects role-version skew, and only because roles are exchan
 
 ### Application-Specific Roles
 
-Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`. To avoid collisions between independent vendors, custom role names SHOULD include a vendor-specific prefix (e.g., `_vendorname_role`).
+Custom roles outside the specification start with `_` and MUST include an explicit version when advertised (e.g., `_myapp_controller@v1`, `_custom_display@v1`). To avoid collisions between independent vendors, custom role names SHOULD include a vendor-specific prefix (e.g., `_vendorname_role`).
 
 Their binary message IDs come from the unmanaged 192-255 range: an application-specific role's own definition assigns its IDs, and a client MUST NOT advertise two roles with conflicting IDs.
 

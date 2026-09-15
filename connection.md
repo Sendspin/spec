@@ -1,6 +1,6 @@
 ## Establishing a Connection
 
-Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
+Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior.
 
 Servers must support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
 
@@ -31,7 +31,7 @@ A connection with empty `activities` ranks lowest.
 
 Clients must persistently store the `server_id` of the server that most recently held the admitted connection while `'playback'` was among its `activities` (the "last-playback server").
 
-When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](messaging.md#server--client-serveractivate) declares its priority. The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Three exceptions:
+When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](messaging.md#server--client-serveractivate) declares its priority. The client MUST NOT apply the priority rules to an activation that is not [admissible](messaging.md#server--client-serveractivate). The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Three exceptions:
 
 - A [pairing attempt](pairing.md#entering-and-leaving-pairing) is not displaced by an incoming `'playback'` or `'pairing'` connection.
 - When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
@@ -59,11 +59,11 @@ The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](mess
 
 Unlike server-initiated connections, servers cannot reclaim clients by reconnecting. How clients handle multiple discovered servers, server selection, and switching is implementation-defined.
 
-**Note:** After this point, Sendspin works independently of how the connection was established. The Sendspin client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
+**Note:** After this point, Sendspin works independently of how the connection was established.
 
 ## Encryption
 
-All Sendspin connections use end-to-end encryption based on the [Noise Protocol Framework](https://noiseprotocol.org/noise.html). Encryption is mandatory for all connections established through the standard discovery mechanisms described in [Establishing a Connection](#establishing-a-connection).
+All Sendspin connections use end-to-end encryption based on the [Noise Protocol Framework](https://noiseprotocol.org/noise.html).
 
 ### Pattern
 
@@ -136,7 +136,13 @@ Both sides MUST hash the raw message bytes exactly as sent and received, not a r
 
 ### Failure Handling
 
-Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
+A server-side failure decided from the cleartext [`client/init`](messaging.md#client--server-clientinit) alone - an unsupported `version`, an unknown `suite`, or a message that is not valid JSON of the defined shape - is an **init failure**: the server MUST send [`server/error`](messaging.md#server--client-servererror) with the matching reason, then close the connection. The message is unauthenticated, so the reason is a hint for logging and operator display.
+
+A `client/init` that parses as JSON of the message envelope and whose `version` is an integer other than `1` is `unsupported_version` regardless of its other payload fields, since a future version may define a different shape. Every other shape failure, including input that is not valid JSON, is `malformed`; `suite` is checked after `version`, then the remaining fields.
+
+Every other handshake-phase failure - a client-side rejection of `server/init`, a handshake timeout, a malformed inner `noise/handshake` payload, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, AEAD failure once in transport mode, or a cleartext frame received after switching to transport mode - is a **silent failure**: the detecting side closes the connection without sending any further message.
+
+Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
 ### Re-handshake
 
