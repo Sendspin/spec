@@ -177,6 +177,7 @@ First message sent by the server after the Noise handshake completes. Sent as an
 
 - `name`: string - friendly name of the server
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
+- `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](roles/source/v1.md#server--client-serverhello-sourcev1-support-object))
 
 ### Client → Server: `client/hello`
 
