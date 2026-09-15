@@ -1,6 +1,6 @@
 # Scope
 
-This file defines the Scope of the Sendspin Working Group for the purposes of the [Community Specification License 1.0](LICENSE.md). The Scope bounds each contributor's and licensee's patent commitment. Changes to Scope are not retroactive.
+This file defines the Scope of the Sendspin project, the Working Group in the terms of the [Community Specification License 1.0](LICENSE.md). The Scope bounds each contributor's and licensee's patent commitment. Changes to Scope are not retroactive.
 
 ## In scope
 

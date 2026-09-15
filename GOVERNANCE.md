@@ -1,8 +1,8 @@
 # Governance
 
-## Working Group
+## The project
 
-The Sendspin Working Group is the group of people developing the Sendspin protocol specification in this repository, under the stewardship of the [Open Home Foundation](https://www.openhomefoundation.org), a Swiss non-profit. The Open Home Foundation holds the Sendspin trademark and acts as the Working Group for the purposes of the [Community Specification License 1.0](LICENSE.md).
+Sendspin is a project of the [Open Home Foundation](https://www.openhomefoundation.org), a Swiss non-profit. Staff of the Foundation run the project and maintain the specification in this repository, together with volunteer contributors; there is no separate membership body. The [Community Specification License 1.0](LICENSE.md) calls the project developing a specification its "Working Group"; wherever the License refers to the Working Group, it means this project. The Open Home Foundation holds the Sendspin trademark and, through the project lead, acts for the project where the License gives the Working Group a right or duty, such as exercising copyright in the specification or submitting it to a standards body.
 
 ## Roles
 
