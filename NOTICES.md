@@ -6,47 +6,20 @@ This project follows the [Open Home Foundation Code of Conduct](CODE_OF_CONDUCT.
 
 Contact for Code of Conduct issues or inquiries: [safety@openhomefoundation.org](mailto:safety@openhomefoundation.org)
 
-## License Acceptance
+## License acceptance
 
-Per [Community Specification License 1.0](LICENSE.md) Section 2.1.3.3, Licensees may indicate their acceptance of the Community Specification License by issuing a pull request to this file, including the Licensee's name, authorized individual's name and system identifier (e.g. GitHub ID), and specification version.
+Implementers may accept the [Community Specification License 1.0](LICENSE.md) by adding an entry here through a pull request (Section 2.1.3.3 of the License); including the License with a distributed implementation is the alternative (Sections 2.1.3.1 and 2.1.3.2). An entry names the Licensee, the authorized individual with a system identifier such as a GitHub username, and the specification version accepted, optionally followed by "or later".
 
-A Licensee may consent to accepting the current Community Specification License version or any future version by indicating "or later" after the specification version.
-
----
-
-Licensee's name:
-
-Authorized individual and system identifier:
-
-Specification version:
-
----
+No entries yet.
 
 ## Withdrawals
 
-Name of party withdrawing:
+A Contributor withdraws from the project by adding an entry here through a pull request (Section 2.3 of the License): the withdrawing party and the date. Commitments made up to that date remain in effect.
 
-Date of withdrawal:
+No entries yet.
 
----
+## Exclusion Notices
 
-## Exclusions
+A Contributor excludes patent claims from its licensing commitment by adding an entry here through a pull request within the windows of Section 3 of the License. An entry names the Contributor, the specification and version, and for each issued patent or published application its number, or its title and application number; for an unpublished application, either the text of the application or the parts of the specification whose implementation makes the excluded claim a Necessary Claim (Section 9.7 of the License).
 
-This section records any Exclusion Notices made against a Draft Specification or Approved Specification as set forth in the Community Specification License. Each Exclusion Notice must include:
-
-- Name of party making the Exclusion Notice:
-- Name of patent owner:
-- Specification:
-- Version number:
-
-For issued patents and published patent applications:
-
-1. patent number(s) or title and application number(s);
-2. identification of the specific part(s) of the Specification whose implementation makes the excluded claim a Necessary Claim.
-
-For unpublished patent applications, either:
-
-1. the text of the filed application; or
-2. identification of the specific part(s) of the Specification whose implementation makes the excluded claim a Necessary Claim.
-
----
+No entries yet.
