@@ -6,14 +6,14 @@ Once the WebSocket connection is established, Client and Server perform an initi
 2. Server → Client: [`server/init`](#server--client-serverinit) (cleartext)
 3. Server → Client: [`noise/handshake`](#client--server-noisehandshake) - Noise message 1 (cleartext)
 4. Client → Server: [`noise/handshake`](#client--server-noisehandshake) - Noise message 2 (cleartext)
-5. Both sides switch to Noise transport mode. From this point, all Sendspin application data is sent as WebSocket binary messages whose payloads are Noise transport ciphertexts.
+5. Both sides switch to Noise transport mode. From this point, all Sendspin application data is sent as WebSocket binary messages whose payloads are Noise transport messages.
 6. Server → Client: [`server/hello`](#server--client-serverhello) (encrypted)
 7. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
 8. Server → Client: [`server/activate`](#server--client-serveractivate) (encrypted)
 
 No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives, except possibly [`client/goodbye`](#client--server-clientgoodbye). See [Encryption](connection.md#encryption) for cryptographic details.
 
-Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are each sent as one complete WebSocket **text** message containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** messages carrying Noise transport ciphertexts.
+Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are each sent as one complete WebSocket **text** message containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** messages carrying Noise transport messages.
 
 WebSocket messages may span multiple RFC 6455 frames. Sendspin operates only on complete WebSocket messages. This WebSocket fragmentation is distinct from Sendspin [fragmentation](#fragmentation).
 
@@ -54,7 +54,7 @@ Message format example:
 }
 ```
 
-WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each complete binary message carries exactly one Noise transport ciphertext; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
+WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each complete binary message carries exactly one Noise transport message; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
 ### Binary Message ID Structure
 
