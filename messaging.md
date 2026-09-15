@@ -128,7 +128,7 @@ Every client and server must implement all messages in this section regardless o
 
 First message sent by the client after the WebSocket connection is established. Contains information necessary for conducting the Noise handshake.
 
-- `client_id`: string - client's static public key (43-character base64url-encoded Curve25519, no padding). See [Identities](connection.md#identities). Persistent across reconnections so servers can associate clients with previous sessions (e.g., remembering group membership, settings, playback queue)
+- `client_id`: string - client's static public key (43-character base64url-encoded Curve25519, no padding). See [Identities](connection.md#identities). Persistent across reconnections so servers can associate clients with previous connections (e.g., remembering group membership, settings, playback queue)
 - `version`: integer (must be `1`) - version of the core message format that the client implements (independent of role versions)
 - `suite`: '25519_ChaChaPoly_SHA256' | '25519_AESGCM_SHA256' - Noise cipher suite the client picked for this connection. See [Cipher Suites](connection.md#cipher-suites)
 
@@ -224,10 +224,10 @@ The activity sets the server may legitimately declare are constrained by which P
 | PSK matched | Allowed activity sets |
 |---|---|
 | [long-term PSK](README.md#definitions) | `[]` or `['playback']` |
-| [pairing PSK](README.md#definitions) | `[]` or `['pairing']` |
-| [Sentinel PSK](connection.md#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
+| [pairing PSK](README.md#definitions) | `[]`, `['pairing']`, `['playback']`¹, `['playback', 'pairing']`¹ |
+| [Sentinel PSK](connection.md#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹, `['playback', 'pairing']`¹ |
 
-¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired access](pairing.md#unpaired-access) enabled.
+¹ Only when the client has [unpaired access](pairing.md#unpaired-access) enabled.
 
 When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [pairing PSK](README.md#definitions), and MUST be a method present in the client's [`supported_pair_methods`](#client--server-clienthello).
 
@@ -235,11 +235,11 @@ When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if
 
 `server/activate` is *admissible* when it satisfies the constraints above. When one is not admissible, the client rejects it, selecting the response by the first rule that applies:
 
-- If the matched PSK is the [Sentinel PSK](connection.md#pre-shared-key), the client does not have [unpaired access](pairing.md#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
+- If the session is [unpaired](README.md#definitions), the client does not have [unpaired access](pairing.md#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 - If `activities` is not an allowed set for the matched PSK, or `active_roles` is non-empty on a connection that is not playback-capable - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If `'pairing'` is in `activities` with a `pairing.method` the matched PSK disallows or the client does not currently offer, or a `pairing.format` the client does not currently offer - reply with [`pair/abort`](pairing.md#client--server-pairabort) reason `method_not_supported`, leaving the connection open.
 
-**Worked example (`pairing_required` vs `unauthorized`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`. If the same connection instead received `activities: ['pairing']` with `active_roles: ['player@v1']`, no unpaired-access setting makes a pairing connection playback-capable, so the reason is `'unauthorized'`.
+**Worked example (`pairing_required`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`.
 
 Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
 

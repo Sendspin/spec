@@ -126,7 +126,7 @@ A `psk_id` lookup miss means the server referenced a credential the client canno
 
 The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record.
 
-The session proceeds as an ordinary [unpaired](README.md#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](pairing.md#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
+The session proceeds as an ordinary [unpaired](README.md#definitions) Sentinel-keyed one, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](pairing.md#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
 ### Prologue
 
@@ -153,3 +153,5 @@ The server initiates, as in the original handshake. The two [`noise/handshake`](
 The server MUST NOT start new application messages after sending Noise message 1, nor the client after receiving it, except for the handshake and hello/activation exchange. This restriction ends when the server sends, or the client receives, the new `server/activate`.
 
 The server MUST tolerate valid old-key application messages received before Noise message 2, since the client may have sent them before receiving message 1. It MAY discard them without processing or responding.
+
+Connection state, such as open streams with their buffered data or the [time filter](messaging.md#clock-synchronization), persists across a re-handshake; only the session keys and what the handshake itself derives change.

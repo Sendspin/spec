@@ -266,7 +266,7 @@ A `psk_id` lookup miss means the server referenced a credential the client canno
 
 The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record.
 
-The session proceeds as an ordinary [unpaired](#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
+The session proceeds as an ordinary [unpaired](#definitions) Sentinel-keyed one, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
 ### Prologue
 
@@ -293,6 +293,8 @@ The server initiates, as in the original handshake. The two [`noise/handshake`](
 The server MUST NOT start new application messages after sending Noise message 1, nor the client after receiving it, except for the handshake and hello/activation exchange. This restriction ends when the server sends, or the client receives, the new `server/activate`.
 
 The server MUST tolerate valid old-key application messages received before Noise message 2, since the client may have sent them before receiving message 1. It MAY discard them without processing or responding.
+
+Connection state, such as open streams with their buffered data or the [time filter](#clock-synchronization), persists across a re-handshake; only the session keys and what the handshake itself derives change.
 
 ## Communication
 
@@ -424,7 +426,7 @@ Every client and server must implement all messages in this section regardless o
 
 First message sent by the client after the WebSocket connection is established. Contains information necessary for conducting the Noise handshake.
 
-- `client_id`: string - client's static public key (43-character base64url-encoded Curve25519, no padding). See [Identities](#identities). Persistent across reconnections so servers can associate clients with previous sessions (e.g., remembering group membership, settings, playback queue)
+- `client_id`: string - client's static public key (43-character base64url-encoded Curve25519, no padding). See [Identities](#identities). Persistent across reconnections so servers can associate clients with previous connections (e.g., remembering group membership, settings, playback queue)
 - `version`: integer (must be `1`) - version of the core message format that the client implements (independent of role versions)
 - `suite`: '25519_ChaChaPoly_SHA256' | '25519_AESGCM_SHA256' - Noise cipher suite the client picked for this connection. See [Cipher Suites](#cipher-suites)
 
@@ -520,10 +522,10 @@ The activity sets the server may legitimately declare are constrained by which P
 | PSK matched | Allowed activity sets |
 |---|---|
 | [long-term PSK](#definitions) | `[]` or `['playback']` |
-| [pairing PSK](#definitions) | `[]` or `['pairing']` |
-| [Sentinel PSK](#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
+| [pairing PSK](#definitions) | `[]`, `['pairing']`, `['playback']`¹, `['playback', 'pairing']`¹ |
+| [Sentinel PSK](#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹, `['playback', 'pairing']`¹ |
 
-¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired access](#unpaired-access) enabled.
+¹ Only when the client has [unpaired access](#unpaired-access) enabled.
 
 When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [pairing PSK](#definitions), and MUST be a method present in the client's [`supported_pair_methods`](#client--server-clienthello).
 
@@ -531,11 +533,11 @@ When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if
 
 `server/activate` is *admissible* when it satisfies the constraints above. When one is not admissible, the client rejects it, selecting the response by the first rule that applies:
 
-- If the matched PSK is the [Sentinel PSK](#pre-shared-key), the client does not have [unpaired access](#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
+- If the session is [unpaired](#definitions), the client does not have [unpaired access](#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 - If `activities` is not an allowed set for the matched PSK, or `active_roles` is non-empty on a connection that is not playback-capable - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If `'pairing'` is in `activities` with a `pairing.method` the matched PSK disallows or the client does not currently offer, or a `pairing.format` the client does not currently offer - reply with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`, leaving the connection open.
 
-**Worked example (`pairing_required` vs `unauthorized`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`. If the same connection instead received `activities: ['pairing']` with `active_roles: ['player@v1']`, no unpaired-access setting makes a pairing connection playback-capable, so the reason is `'unauthorized'`.
+**Worked example (`pairing_required`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`.
 
 Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
 
@@ -758,7 +760,7 @@ A code-based pairing runs over a Sentinel-keyed connection: the channel is unaut
 
 The client reveals the new long-term PSK only after `server_kc` verifies, and only as `wrapped_psk` [sealed under the CPace output](#wrapping): a peer that cannot complete the PAKE - wrong pairing code, or a man in the middle relaying between two handshakes, whose differing `h` gives each leg a different `sid` - neither triggers the reveal nor can unwrap it.
 
-Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code, so it cannot run while audio is playing on the same device; the operator must stop playback before initiating pairing (see [Multiple servers](#multiple-servers-server-initiated)).
+Static pairing methods (Pairing PSK, Static Pairing Code) do not use the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code. Where the out-channel is also a role's output, the client suspends that output locally for the duration of the attempt (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
 
 Clients with a usable out-channel (display, speaker, etc.) should offer `dynamic_pairing_code` rather than `static_pairing_code`, which is intended for devices without one. Clients whose display can render a QR code should also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
 
@@ -774,7 +776,7 @@ Eviction needs no wire signal. An evicted server's next handshake references a `
 
 ### Entering and leaving pairing
 
-Pairing and playback are mutually exclusive on a connection. When a server moves an established connection into pairing it first quiesces the client's streams - sending [`stream/end`](#server--client-streamend) for active stream roles and a [`server/state`](#server--client-serverstate) with null role objects for state roles, as when a role is removed from `active_roles` - and then sends the pairing [`server/activate`](#server--client-serveractivate) with empty `active_roles`. The quiesce is stream-only: unlike an [`available: false`](#external-source-handling) transition, the client keeps its group membership and queued group state through the pairing activity - no move to a solo group, no previous-group memory, no bar on resuming in place.
+Pairing can run alongside playback. A [`server/activate`](#server--client-serveractivate) that adds `'pairing'` to `activities` does not by itself affect `active_roles`, streams, or group membership. Where the pairing code's out-channel is also a role's output - the speaker playing the stream, the display showing artwork - the client suspends that output locally for the duration of the attempt, staying [`available`](#client--server-clientstate) throughout. Streams stay open and their timeline is unaffected: a player discards the audio scheduled during the attempt and afterwards resumes in sync.
 
 Each pairing `server/activate` admits one **pairing attempt**, in progress from its first pairing message - [`client/pair-init`](#client--server-clientpair-init) (pairing-code methods) or [`client/pair-finalize`](#client--server-clientpair-finalize) (Pairing PSK) - until success or [`pair/abort`](#client--server-pairabort). [`client/pair-pending`](#client--server-clientpair-pending) precedes an attempt and does not start it. The client bounds each attempt with an **attempt timeout** measured from its first message (recommended 2 minutes); on expiry it sends `pair/abort` with reason `attempt_timeout`.
 
@@ -792,7 +794,7 @@ A client MAY admit a server with no pairing record to activate roles or declare 
 
 When unpaired access is enabled, the client MAY send [`client/goodbye`](#client--server-clientgoodbye) with reason `'restart'` and close an existing unpaired connection so the next `client/hello` advertises the updated setting.
 
-On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](#definitions): a server MUST NOT declare `'playback'` or activate roles on a Sentinel-keyed connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist, MUST be revocable by the operator, and MUST be discarded on a successful pairing. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](#server--client-serveractivate). The server MAY hold the connection at empty `activities`, ready to activate roles once approved, or to enter pairing.
+On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](#definitions): a server MUST NOT declare `'playback'` or activate roles on an [unpaired](#definitions) connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist, MUST be revocable by the operator, and MUST be discarded on a successful pairing. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](#server--client-serveractivate). The server MAY hold the connection at empty `activities`, ready to activate roles once approved, or to enter pairing.
 
 While a client is unapproved, the server SHOULD identify and present it to the operator. When presenting clients, a server MUST clearly distinguish those that are neither paired nor approved from those that are, so a new client claiming a familiar name cannot pass for an existing device. When an unapproved client offers pairing, the server MUST present it as a clearly available action for that client. For an approved client, pairing SHOULD stay available as an upgrade.
 
