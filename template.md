@@ -13,7 +13,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 
 ## Normative Language
 
-The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174).
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) when, and only when, they appear in all capitals, as shown here.
 
 ## Protocol overview
 
@@ -115,21 +115,21 @@ sequenceDiagram
 
 Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
 
-This specification defines the following roles: [`player`](roles/player/v1.md#player-messages), [`source`](roles/source/v1.md#source-messages), [`controller`](roles/controller/v1.md#controller-messages), [`metadata`](roles/metadata/v1.md#metadata-messages), [`artwork`](roles/artwork/v1.md#artwork-messages), [`visualizer`](roles/visualizer/v1.md#visualizer-messages), [`color`](roles/color/v1.md#color-messages). All servers must implement all versions of these roles described in this specification.
+This specification defines the following roles: [`player`](roles/player/v1.md#player-messages), [`source`](roles/source/v1.md#source-messages), [`controller`](roles/controller/v1.md#controller-messages), [`metadata`](roles/metadata/v1.md#metadata-messages), [`artwork`](roles/artwork/v1.md#artwork-messages), [`visualizer`](roles/visualizer/v1.md#visualizer-messages), [`color`](roles/color/v1.md#color-messages). All servers MUST implement all versions of these roles described in this specification.
 
 All role names and versions not starting with `_` are reserved for future revisions of this specification.
 
 ### Priority and Activation
 
-Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
+Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all SHOULD be listed: `["player@v2", "player@v1"]`.
 
-The server activates at most one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list, or none if server policy declines to activate that family. A server MUST NOT activate a role or version the client did not list in `supported_roles`. The server reports activated roles in `active_roles`; clients MUST consult it and refrain from sending commands or state for roles that aren't active.
+The server activates at most one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list, or none if server policy declines to activate that family. A server MUST NOT activate a role or version the client did not list in `supported_roles`. The server reports activated roles in `active_roles`; clients MUST consult the activation state established by the `server/activate` messages they have received and refrain from sending commands or state for roles that aren't active.
 
 Message object keys (e.g., `player?`, `controller?`) use unversioned role names. The server determines the appropriate version from the client's `active_roles`.
 
 ### Detecting Outdated Servers
 
-Servers should track when clients request roles or role versions they don't implement (excluding those starting with `_`). This indicates the client supports newer role versions than the server and the server needs to be updated.
+Servers SHOULD track when clients request roles or role versions they don't implement (excluding those starting with `_`). This indicates the client supports newer role versions than the server and the server needs to be updated.
 
 This mechanism only detects role-version skew, and only because roles are exchanged after the handshake. A newer core `version`, cipher suite, or handshake (a cipher or handshake change is itself a core `version` bump) makes the [handshake](connection.md#failure-handling) abort before roles are exchanged, so that skew surfaces as a failed connection rather than through this role-request signal.
 

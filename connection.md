@@ -1,8 +1,8 @@
 ## Establishing a Connection
 
-Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior.
+Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are RECOMMENDED as they provide standardized multi-server behavior.
 
-Servers must support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
+Servers MUST support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
 
 The WebSocket transport MUST be plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
 
@@ -12,13 +12,13 @@ Clients announce their presence via mDNS using:
 - Service type: `_sendspin._tcp.local.`
 - Port: The port the Sendspin client is listening on (recommended: `8928`)
 - TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
-- TXT record: `name` key specifying the friendly name of the client (optional)
+- TXT record: `name` key specifying the friendly name of the client (OPTIONAL)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
 The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
 
-**Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
+Clients MUST NOT manually connect to servers while advertising `_sendspin._tcp`.
 
 #### Multiple servers (server-initiated)
 
@@ -29,7 +29,7 @@ A client holds at most one admitted connection at a time, except where noted bel
 
 A connection with empty `activities` ranks lowest.
 
-Clients must persistently store the `server_id` of the server that most recently held the admitted connection while `'playback'` was among its `activities` (the "last-playback server").
+Clients MUST persistently store the `server_id` of the server that most recently held the admitted connection while `'playback'` was among its `activities` (the "last-playback server").
 
 When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](messaging.md#server--client-serveractivate) declares its priority. The client MUST NOT apply the priority rules to an activation that is not [admissible](messaging.md#server--client-serveractivate). The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Three exceptions:
 
@@ -43,17 +43,17 @@ A displaced connection receives [`client/goodbye`](messaging.md#client--server-c
 
 ### Client Initiated Connections
 
-If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
+If clients prefer to initiate the connection instead of waiting for the server to connect, the server MUST be discoverable via mDNS using:
 - Service type: `_sendspin-server._tcp.local.`
 - Port: The port the Sendspin server is listening on (recommended: `8927`)
 - TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
-- TXT record: `name` key specifying the friendly name of the server (optional)
+- TXT record: `name` key specifying the friendly name of the server (OPTIONAL)
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
 The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](messaging.md#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
 
-**Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
+Clients MUST NOT advertise `_sendspin._tcp` while using client-initiated connections.
 
 #### Multiple servers (client-initiated)
 
@@ -80,7 +80,7 @@ A suite specifies the `<DH>_<cipher>_<hash>` part of the full Noise protocol nam
 - `25519_ChaChaPoly_SHA256` - software-friendly suite
 - `25519_AESGCM_SHA256` - hardware-accelerated suite (AES-NI / ARMv8 Crypto Extensions)
 
-Servers must support both suites. Clients must support at least one.
+Servers MUST support both suites. Clients MUST support at least one.
 
 The client picks one suite and announces it in [`client/init`](messaging.md#client--server-clientinit); since servers are required to support every suite, no negotiation is needed.
 
@@ -146,7 +146,7 @@ Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to recei
 
 ### Re-handshake
 
-The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](pairing.md#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
+The server MAY rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](pairing.md#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
 The server initiates, as in the original handshake. The two [`noise/handshake`](messaging.md#client--server-noisehandshake) messages are sent as encrypted binary messages inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](messaging.md#server--client-serverhello) → [`client/hello`](messaging.md#client--server-clienthello) → [`server/activate`](messaging.md#server--client-serveractivate).
 
