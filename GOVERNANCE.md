@@ -6,7 +6,7 @@ The Sendspin Working Group is the group of people developing the Sendspin protoc
 
 ## Roles
 
-- **Project lead** - sets direction and has the final say on disputed changes. Currently Paulus Schoutsen.
+- **Project lead** - sets direction and has the final say on disputed changes. Currently Marcel van der Veldt.
 - **Editors** - maintainers with write access who review and merge changes. Listed in the repository's maintainer settings.
 - **Contributors** - anyone whose Contribution is merged. Contributions are accepted under the [Contributor License Agreement](CONTRIBUTOR-LICENSE-AGREEMENT.md).
 
