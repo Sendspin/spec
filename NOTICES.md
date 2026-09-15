@@ -2,7 +2,9 @@
 
 ## Code of Conduct
 
-Contact for Code of Conduct issues or inquiries: _<two named individuals, to be filled in by the Open Home Foundation>_
+This project follows the [Open Home Foundation Code of Conduct](CODE_OF_CONDUCT.md).
+
+Contact for Code of Conduct issues or inquiries: [safety@openhomefoundation.org](mailto:safety@openhomefoundation.org)
 
 ## License Acceptance
 
