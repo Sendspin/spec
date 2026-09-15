@@ -1386,10 +1386,10 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls whether this source streams to the server:
-  - `start`: server requests the source to begin streaming. The client SHOULD promptly send `client-stream/start` and then send source audio chunks.
-  - `stop`: server requests the source to stop streaming. The client SHOULD send `client-stream/end` and stop sending source audio chunks.
+  - `start`: server requests the source to open an input stream. The command authorizes at most one opening. The client SHOULD promptly send `client-stream/start` and then send source audio chunks.
+  - `stop`: server requests the source to stop streaming. The client MUST clear any pending start authorization, stop sending source audio chunks and, if its input stream is open, send `client-stream/end`.
 
-Both commands are idempotent: a `start` received while the input stream is open MUST NOT restart the stream, and a `stop` received while already stopped is ignored.
+A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
 
 The server MUST NOT send `start` unless the source role is active, it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
@@ -1397,15 +1397,17 @@ A client MUST ignore `start` received while it is unavailable. Becoming availabl
 
 #### Default streaming behavior
 
-The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming. An unsolicited `client-stream/start` (received when the server has not issued `start`) is a protocol error: the server MUST NOT treat the input stream as open and should close the connection, consistent with the binary-chunk rejection rule below.
+The default after the handshake is `stop`: a source MUST NOT stream until it receives `command: "start"` from the server. The server is the only party that initiates streaming. A `client-stream/start` that opens an input stream without a corresponding server `start` is a protocol error: the server MUST NOT treat the input stream as open and SHOULD close the connection.
+
+Servers MUST NOT treat an otherwise valid `client-stream/start` as unsolicited solely because the corresponding `start` was sent before the server received the preceding `client-stream/end` or availability update. The command may have reached the client after that transition.
 
 Streaming state is per-connection: a previously sent `start` does not survive reconnection, and a server that still wants the stream MUST send `command: "start"` again.
 
 A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
-When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles`, it clears the previous start authorization, stops sending chunks, and sends `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until the server sends a new `start`.
+When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
 
-A source with an open input stream that becomes [`available: false`](#external-source-handling) sends `client-stream/end` before it reports `available: false` in `client/state`; the server treats the transition as an implicit `stop`.
+A source that becomes unavailable MUST clear any pending start authorization. If its input stream is open, it MUST stop sending source audio chunks and send `client-stream/end` before reporting [`available: false`](#external-source-handling) in `client/state`. The server treats the transition as an implicit `stop`.
 
 ### Client → Server: `client-stream/start`
 
@@ -1432,12 +1434,13 @@ A `client-stream/start` received while an input stream is already open replaces 
 
 ### Client → Server: `client-stream/end`
 
-The client ends the current input stream. After this message, no more source audio chunks SHOULD be sent until a new `client-stream/start`.
+The client ends the current input stream. After sending this message, the client MUST NOT send another `client-stream/start` until it receives a new server `start`. Source audio MUST NOT resume before that `client-stream/start`.
 
 ### Client → Server: Source Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client-stream/start` or after a `client-stream/end`) or the client is not [`available`](#client--server-clientstate).
-Clients MUST send `client-stream/start` before the first audio chunk. After the server sends `command: "stop"` or removes the source role, chunks may keep arriving until the client processes the command or activation and sends `client-stream/end`; servers MUST tolerate these and MAY discard them.
+Receiving a source audio message without an open input stream, or while the latest [`client/state`](#client--server-clientstate) received by the server reports `available: false`, is a protocol error: the server MUST close the connection. The client's stream lifecycle messages, audio chunks, and availability updates are delivered in send order on the same connection, so network delay cannot move earlier chunks past `client-stream/end` or an availability update.
+
+Clients MUST send `client-stream/start` before the first audio chunk. Sending `command: "stop"` or removing the source role does not itself close an input stream at the server. After either action, the server MUST tolerate otherwise valid in-flight responses to a previously sent `start`, including `client-stream/start` and audio chunks, until it receives `client-stream/end`. It MAY discard audio payloads but MUST process `client-stream/start` and `client-stream/end` in received order.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
