@@ -136,13 +136,19 @@ Both sides MUST hash the raw message bytes exactly as sent and received, not a r
 
 ### Failure Handling
 
-Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
+A server-side failure decided from the cleartext [`client/init`](messaging.md#client--server-clientinit) alone - an unsupported `version`, an unknown `suite`, or a message that is not valid JSON of the defined shape - is an **init failure**: the server MUST send [`server/error`](messaging.md#server--client-servererror) with the matching reason, then close the connection. The message is unauthenticated, so the reason is a hint for logging and operator display.
+
+A `client/init` that parses as JSON of the message envelope and whose `version` is an integer other than `1` is `unsupported_version` regardless of its other payload fields, since a future version may define a different shape. Every other shape failure, including input that is not valid JSON, is `malformed`; `suite` is checked after `version`, then the remaining fields.
+
+Every other handshake-phase failure - a client-side rejection of `server/init`, a handshake timeout, a malformed inner `noise/handshake` payload, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, AEAD failure once in transport mode, or a cleartext message received after switching to transport mode - is a **silent failure**: the detecting side closes the connection without sending any further message.
+
+Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
 ### Re-handshake
 
 The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](pairing.md#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
-The server initiates, as in the original handshake. The two [`noise/handshake`](messaging.md#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](messaging.md#server--client-serverhello) → [`client/hello`](messaging.md#client--server-clienthello) → [`server/activate`](messaging.md#server--client-serveractivate).
+The server initiates, as in the original handshake. The two [`noise/handshake`](messaging.md#client--server-noisehandshake) messages are sent as encrypted binary messages inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](messaging.md#server--client-serverhello) → [`client/hello`](messaging.md#client--server-clienthello) → [`server/activate`](messaging.md#server--client-serveractivate).
 
 The server MUST NOT start new application messages after sending Noise message 1, nor the client after receiving it, except for the handshake and hello/activation exchange. This restriction ends when the server sends, or the client receives, the new `server/activate`.
 

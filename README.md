@@ -276,13 +276,19 @@ Both sides MUST hash the raw message bytes exactly as sent and received, not a r
 
 ### Failure Handling
 
-Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
+A server-side failure decided from the cleartext [`client/init`](#client--server-clientinit) alone - an unsupported `version`, an unknown `suite`, or a message that is not valid JSON of the defined shape - is an **init failure**: the server MUST send [`server/error`](#server--client-servererror) with the matching reason, then close the connection. The message is unauthenticated, so the reason is a hint for logging and operator display.
+
+A `client/init` that parses as JSON of the message envelope and whose `version` is an integer other than `1` is `unsupported_version` regardless of its other payload fields, since a future version may define a different shape. Every other shape failure, including input that is not valid JSON, is `malformed`; `suite` is checked after `version`, then the remaining fields.
+
+Every other handshake-phase failure - a client-side rejection of `server/init`, a handshake timeout, a malformed inner `noise/handshake` payload, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, AEAD failure once in transport mode, or a cleartext message received after switching to transport mode - is a **silent failure**: the detecting side closes the connection without sending any further message.
+
+Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
 ### Re-handshake
 
 The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
-The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
+The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary messages inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
 
 The server MUST NOT start new application messages after sending Noise message 1, nor the client after receiving it, except for the handshake and hello/activation exchange. This restriction ends when the server sends, or the client receives, the new `server/activate`.
 
@@ -296,14 +302,16 @@ Once the WebSocket connection is established, Client and Server perform an initi
 2. Server → Client: [`server/init`](#server--client-serverinit) (cleartext)
 3. Server → Client: [`noise/handshake`](#client--server-noisehandshake) - Noise message 1 (cleartext)
 4. Client → Server: [`noise/handshake`](#client--server-noisehandshake) - Noise message 2 (cleartext)
-5. Both sides switch to Noise transport mode. From this point, all Sendspin application data is sent as WebSocket binary frames whose payloads are Noise transport ciphertexts.
+5. Both sides switch to Noise transport mode. From this point, all Sendspin application data is sent as WebSocket binary messages whose payloads are Noise transport messages.
 6. Server → Client: [`server/hello`](#server--client-serverhello) (encrypted)
 7. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
 8. Server → Client: [`server/activate`](#server--client-serveractivate) (encrypted)
 
-No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives, except possibly [`client/goodbye`](#client--server-clientgoodbye). See [Encryption](#encryption) for cryptographic details.
+No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives, except possibly [`client/goodbye`](#client--server-clientgoodbye), or [`server/error`](#server--client-servererror) sent in place of `server/init`. See [Encryption](#encryption) for cryptographic details.
 
-Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are sent as WebSocket **text** frames containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** frames carrying Noise transport ciphertexts.
+Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`, `server/error`) are each sent as one complete WebSocket **text** message containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** messages carrying Noise transport messages.
+
+WebSocket messages may span multiple RFC 6455 frames. Sendspin operates only on complete WebSocket messages. This WebSocket fragmentation is distinct from Sendspin [fragmentation](#fragmentation).
 
 WebSocket control frames (Ping, Pong, Close; RFC 6455) are not Sendspin messages: they remain valid at any time, are not encrypted at the Noise layer, and Ping/Pong is the expected connection-liveness mechanism.
 
@@ -342,11 +350,11 @@ Message format example:
 }
 ```
 
-WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each binary message is a Noise transport ciphertext; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
+WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each complete binary message carries exactly one Noise transport message; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
 ### Binary Message ID Structure
 
-The first byte of every binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
+The first byte of every decrypted binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
 | IDs | Assignment |
 |---|---|
@@ -366,9 +374,9 @@ Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24
 
 ### Fragmentation
 
-A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per frame is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary frames using the fragment message type.
+A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per Noise transport message is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary messages using the fragment message type.
 
-**Wire format** (inside the AEAD-protected plaintext of each fragment frame):
+**Wire format** (inside the AEAD-protected plaintext of each fragment message):
 
 - First fragment: `[1][flags][orig_type][data]`
 - Subsequent fragments: `[1][flags][data]`
@@ -379,13 +387,13 @@ The concatenated `data` from all fragments yields the original message's payload
 
 **Constraints:**
 
-- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other data frame in that direction, whether fragmented or not.
-- Senders should not fragment messages that fit in a single non-fragmented frame.
+- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other binary message in that direction, whether fragmented or not.
+- Senders should not fragment messages that fit in a single Noise transport message.
 - A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with the rest of the frame; on any other fragment, append the frame's data to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
 
-**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment data frame received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
+**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment binary message received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
 
 ## Clock Synchronization
 
@@ -444,22 +452,31 @@ The encrypted payload carried inside each Noise handshake message is a UTF-8 JSO
   - `psk_category`: 'lt' | 'pr' | 'sn' - the category the server is using the referenced PSK as: long-term, pairing, or Sentinel. A `psk_id` the client holds only under a different category is a lookup miss (see [Pre-Shared Key](#pre-shared-key)). The codes share one length, so the encrypted payload's length is independent of the category.
 - **Noise message 2 payload** (client → server): the empty object as the literal two bytes `{}` (not a zero-length Noise payload)
 
-A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a handshake failure and closes the WebSocket (see [Failure Handling](#failure-handling)).
+A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a [silent failure](#failure-handling) and closes the WebSocket.
 
-After both handshake messages have been exchanged, both sides switch to Noise transport mode (all subsequent messages travel as the binary Noise-ciphertext frames described above).
+After both handshake messages have been exchanged, both sides switch to Noise transport mode (all subsequent messages travel as the binary messages described above).
 
-The same `noise/handshake` message is used for the in-band [re-handshake](#re-handshake): the two messages then travel as ordinary encrypted JSON messages (binary frames, message type `0`), not bare Noise bytes. Noise message 2 is still encrypted under the pre-re-handshake transport keys; the first frame each side sends after the handshake completes uses the new keys.
+The same `noise/handshake` message is used for the in-band [re-handshake](#re-handshake): the two messages then travel as ordinary encrypted JSON messages (binary messages, message type `0`), not bare Noise bytes. Noise message 2 is still encrypted under the pre-re-handshake transport keys; the first binary message each side sends after the handshake completes uses the new keys.
+
+### Server → Client: `server/error`
+
+Sent by the server in place of [`server/init`](#server--client-serverinit) when it cannot accept the client's [`client/init`](#client--server-clientinit). The server closes the connection after sending. See [Failure Handling](#failure-handling).
+
+- `reason`: string - one of:
+  - `unsupported_version` - the client's `version` is not one the server implements
+  - `unsupported_suite` - the client's `suite` is not one the server implements
+  - `malformed` - `client/init` is not valid JSON of the defined shape
 
 ### Server → Client: `server/hello`
 
-First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`).
+First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary message, message type `0`).
 
 - `name`: string - friendly name of the server
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 
 ### Client → Server: `client/hello`
 
-Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary frame, message type `0`). Contains information about the client's capabilities and roles.
+Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary message, message type `0`). Contains information about the client's capabilities and roles.
 
 Clients that can output audio should have the role `player`.
 
@@ -490,7 +507,7 @@ If a role version requires a support object, the server MUST NOT activate that v
 
 ### Server → Client: `server/activate`
 
-Declares the server's current purpose on this connection. Sent as an encrypted message (binary frame, message type `0`). May be re-sent any time to change the activity set.
+Declares the server's current purpose on this connection. Sent as an encrypted message (binary message, message type `0`). May be re-sent any time to change the activity set.
 
 - `activities`: ('playback' | 'pairing')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
@@ -617,7 +634,7 @@ Every message MUST carry the full state of each role object it includes. Omittin
 
 After a `server/activate` adds or re-adds a role that defines a `server/state` object, the server MUST promptly send a `server/state` containing that role's current state, or `null` if there is no state to provide.
 
-The server MUST promptly report state changes for active roles.
+The server MUST promptly report changes to active roles' `server/state` objects. Scheduled updates taking effect and playback progress advancing as reported require no new message.
 
 The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry a past or present `timestamp` if the role object has one, so the client is brought up to date before any scheduled update follows.
 
@@ -1173,9 +1190,9 @@ For each [`stream/start`](#server--client-streamstart) the server SHOULD select 
 
 The `player` object in [`client/state`](#client--server-clientstate) has this structure:
 
-Informs the server of player-specific state changes. Only for clients with the `player` role.
+Informs the server of player-specific state changes. Only for clients whose `player` role is active.
 
-State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or via device controls.
+State updates MUST be sent whenever a field in the `player` state object changes, including when the volume was changed through a `server/command` or via device controls.
 
 - `player`: object
   - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands`
@@ -1190,13 +1207,13 @@ State updates must be sent whenever any state changes, including when the volume
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
     - `bit_depth`: integer - bit depth (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
 
-**Supported commands:** `supported_commands` advertises settability, not reportability. It lists the commands the server may send, and a player MAY report `volume` or `muted` without offering the matching command: an amplifier with a physical volume knob reports the position it is set to but cannot be set remotely. Capability also cannot be inferred from field presence, since `output_delay_ms` is never optional, whether or not `set_output_delay` is offered. A server MUST NOT treat a reported `volume` or `muted` as settable while the matching command is absent from `supported_commands`, though it MAY still surface the reported value as read-only.
+**Supported commands:** `supported_commands` advertises settability, not reportability. It lists the commands the server MAY send, and a player MAY report `volume` or `muted` without offering the matching command: an amplifier with a physical volume knob reports the position it is set to but cannot be set remotely. Capability also cannot be inferred from field presence, since `output_delay_ms` is never optional, whether or not `set_output_delay` is offered. A server MUST NOT treat a reported `volume` or `muted` as settable while the matching command is absent from `supported_commands`, though it MAY still surface the reported value as read-only.
 
-**Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST clamp `output_delay_ms` to the range 0-5000. Clients must persist `output_delay_ms` locally across reboots and server reconnections. Clients may update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
+**Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST clamp `output_delay_ms` to the range 0-5000. Clients MUST persist `output_delay_ms` locally across reboots and server reconnections. Clients MAY update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
 **Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
 
-**Timing parameters:** Clients may update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers must factor in updated values for subsequent playback timing. Clients should debounce updates locally, reporting changes only after a shift in conditions appears sustained, not on transient fluctuations.
+**Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
 
 **Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Transmit timestamps](#transmit-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
@@ -1209,7 +1226,7 @@ The `player` object in [`server/command`](#server--client-servercommand) has thi
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
-  - `command`: 'volume' | 'mute' | 'set_output_delay' - must be listed in `supported_commands` from [`client/state`](#client--server-clientstate-player-object); unlisted commands are ignored by the client
+  - `command`: 'volume' | 'mute' | 'set_output_delay' - MUST be listed in `supported_commands` from the latest player state the server received in [`client/state`](#client--server-clientstate-player-object); commands absent from the client's current `supported_commands` are ignored by the client
   - `volume?`: integer - volume range 0-100, required if `command` is `volume`, absent otherwise
   - `mute?`: boolean - true to mute, false to unmute, required if `command` is `mute`, absent otherwise
   - `output_delay_ms?`: integer - delay in milliseconds (0-5000), required if `command` is `set_output_delay`, absent otherwise
@@ -1231,18 +1248,20 @@ The format MUST be one the client listed in its [`supported_formats`](#client--s
 
 ### Server → Client: `stream/clear` player
 
-When [`stream/clear`](#server--client-streamclear) includes the player role, clients should clear all buffered audio chunks and continue with chunks received after this message.
+When [`stream/clear`](#server--client-streamclear) includes the player role, clients MUST clear all buffered audio chunks and continue with chunks received after this message.
 
 ### Server → Client: Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate).
+Servers MUST NOT send audio messages outside an active player stream.
+
+During an active stream, unavailable clients SHOULD discard otherwise valid audio data and MUST NOT close solely for its arrival.
 
 - Byte 0: message type `4` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
 - Bytes 9-12: send_ahead (big-endian uint32) - microseconds from the server's transmission of this message to `timestamp`
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the [time filter](#clock-synchronization), subtracting their [`output_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays) by accounting for these delays when submitting audio to the hardware.
+The timestamp indicates when the first audio sample in this chunk should be output. Clients MUST translate this server timestamp to their local clock using the [time filter](#clock-synchronization), subtracting their [`output_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients SHOULD compensate for any known processing delays (e.g., DAC latency, audio buffer delays) by accounting for these delays when submitting audio to the hardware.
 
 `send_ahead` reports the lead the server had in hand when it sent the chunk: its transmit time is `timestamp - send_ahead` in the server's clock, taken as described in [Transmit timestamps](#transmit-timestamps). The field saturates rather than wrapping: a server MUST send `0` when it transmits at or after `timestamp`, and `4294967295` when the true lead exceeds what the field can represent (about 71 minutes). Both saturation values report that no lead was measured, not a lead of that length, so a player MUST NOT use a chunk carrying either as a delay sample.
 
@@ -1266,7 +1285,7 @@ Each client is responsible for maintaining its own synchronization with the serv
 - **Accuracy floor:** In steady state, implementations MUST keep this error within ±1 ms. The only exception is the one-shot resynchronization exempted from the speed cap above, which MUST be rare.
 - **Accuracy target:** Implementations SHOULD aim for ±0.5 ms.
 - Clients subtract their [`output_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback.
-- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync.
+- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients SHOULD drop these late chunks to maintain sync.
 
 ### Startup Behavior
 
@@ -1278,16 +1297,16 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 - **Chunk duration bounds:** A server MUST NOT send an audio chunk longer than 150 ms, and SHOULD NOT send one shorter than 15 ms (the final chunk of a stream or the chunk before a format change MAY be shorter).
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
-- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear), servers must schedule the first audio timestamp far enough in the future to satisfy each player's lead. An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
+- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear), servers MUST schedule the first audio timestamp far enough in the future to satisfy each player's minimum send-ahead specified below. An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
 - Servers factor in each client's [`output_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
 - `required_lead_time_ms` is a hint that keeps the start of the stream from being cut off. The server schedules the first chunk at least `min_buffer_ms + output_delay_ms` ahead, and SHOULD extend the lead toward `required_lead_time_ms` only when doing so adds no latency, i.e. for buffered sources but not live streams.
 - For grouped playback, use a common send-ahead equal to the maximum per-player send-ahead across grouped players. Recompute when players join, leave, or update their timing parameters.
-- When the maximum decreases mid-stream (player leaves group, or updates timing), the server may keep the current send-ahead unchanged or reduce it toward the new maximum. The choice depends on implementation priorities (lowest latency vs. glitchless audio).
-- Especially for live streams, servers must schedule timestamps so each player's queued audio duration stays at or above its `min_buffer_ms`. `buffer_capacity` is a hard per-player byte cap and may reduce the effective queued duration below the requested `min_buffer_ms` when the negotiated codec's byte rate would otherwise exceed it.
+- When the maximum decreases mid-stream (player leaves group, or updates timing), the server MAY keep the current send-ahead unchanged or reduce it toward the new maximum. The choice depends on implementation priorities (lowest latency vs. glitchless audio).
+- Especially for live streams, servers MUST schedule timestamps so each player's queued audio duration stays at or above its `min_buffer_ms`. `buffer_capacity` is a hard per-player byte cap and may reduce the effective queued duration below the requested `min_buffer_ms` when the negotiated codec's byte rate would otherwise exceed it.
 - When timing updates or joining players increase the required send-ahead during live playback, players MAY temporarily fall below their requested `min_buffer_ms`. The server SHOULD restore the requested minimum, subject to `buffer_capacity`.
 - For buffered streams, prefer filling each player's queue near `buffer_capacity` to maximize stability.
-- `buffer_capacity` is a hard per-player byte limit; servers should not send data that would cause a player's queued compressed audio to exceed this limit.
-- Servers may rate-limit, debounce, or coalesce a player's timing updates to prevent disruption from frequent or small changes.
+- `buffer_capacity` is a hard per-player byte limit; servers MUST NOT send data that would cause a player's queued compressed audio to exceed this limit.
+- Servers MAY rate-limit, debounce, or coalesce a player's timing updates to prevent disruption from frequent or small changes.
 
 ### Suggested correction strategy
 
@@ -1305,11 +1324,11 @@ The player renders decoded frames at their server timestamps translated to local
 2. If the absolute error is below the dead band (~100 µs), output the chunk unchanged.
 3. Otherwise correct by `N` frames: if playback is running late (the chunk reaches the output after its scheduled local time), drop `N` frames to catch up; if running early, duplicate `N` frames to wait. Residual error beyond the step carries to the next chunk.
 
-**Choosing N.** Use the smallest `N` that keeps up with drift, scaled to hold the step duration constant across sample rates: `N = max(1, round(21 µs × sample_rate_hz / 1,000,000))` (N=1 at 44.1 and 48 kHz, 2 at 96 kHz, 4 at 192 kHz). A chunk's correction MUST NOT exceed the ±0.5% speed cap, so `N ≤ floor(0.005 × samples_in_chunk)`. Keep `N` small; at realistic drift any `N` in this range stays masked.
+**Choosing N.** Use the smallest `N` that keeps up with drift, scaled to hold the step duration constant across sample rates: `N = max(1, round(21 µs × sample_rate_hz / 1,000,000))` (N=1 at 44.1 and 48 kHz, 2 at 96 kHz, 4 at 192 kHz). This example limits each chunk's correction to ±0.5%: `N ≤ floor(0.005 × samples_in_chunk)`. Keep `N` small; at realistic drift any `N` in this range stays masked.
 
 **Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
 
-**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. This is a deliberate discontinuity and MUST be rare.
+**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. Keep these one-shot corrections rare, as required by [Correction Quality](#correction-quality).
 
 ## Source messages
 This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (line sensing), and stream timestamped audio frames.
@@ -1417,16 +1436,16 @@ Source timestamps are derived from the [time filter](#clock-synchronization)'s m
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the group this client is part of, and switch between groups.
 
-Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
+Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message MUST implement all messages in this section.
 
 ### Client → Server: `client/command` controller object
 
 The `controller` object in [`client/command`](#client--server-clientcommand) has this structure:
 
-Control the group that's playing and switch groups. Only valid from clients with the `controller` role.
+Control the group that's playing and switch groups. Only valid from clients whose `controller` role is active.
 
 - `controller`: object
-  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
+  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative' - MUST be one of the values listed in `supported_commands` from the latest controller state the client received in [`server/state`](#server--client-serverstate-controller-object). The server MUST ignore commands absent from its current `supported_commands`
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
   - `position_ms?`: integer - absolute playback position in milliseconds, range 0 to [`seek_max_ms`](#server--client-serverstate-controller-object), only set if `command` is `seek`
@@ -1434,7 +1453,7 @@ Control the group that's playing and switch groups. Only valid from clients with
 
 #### Command behaviour
 
-- 'play' - resume playback from current position. If nothing is currently playing, the server must try to resume the group's last playing media. This history should persist across server and client reboots
+- 'play' - resume playback from current position. If nothing is currently playing, the server SHOULD resume the group's last playing media. The server SHOULD retain this history across server and client reboots
 - 'pause' - pause playback at current position
 - 'stop' - stop playback and reset position to beginning
 - 'next' - skip to next track, chapter, etc.
@@ -1450,7 +1469,7 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'seek' - seek to an absolute position. The client MUST include `position_ms`; the server MUST ignore the command if `position_ms` is outside the range 0 to `seek_max_ms`
 - 'seek_relative' - seek by an offset from the current position. The client MUST include `offset_ms`; the server applies it on a best-effort basis and MUST clamp the result to the seekable range
 
-**Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to the players in the group that support the `volume` command, preserving relative volume levels while achieving the requested volume as closely as player boundaries allow. Players without volume support are excluded and receive no volume command:
+**Setting group volume:** When setting group volume via the 'volume' command, the server MUST apply the following algorithm to the players in the group that support the `volume` command, preserving relative volume levels while achieving the requested volume as closely as player boundaries allow. Players without volume support are excluded and receive no volume command:
 
 1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of their volumes)
 2. Apply the delta to each player's volume
@@ -1462,9 +1481,11 @@ Control the group that's playing and switch groups. Only valid from clients with
      - All delta has been successfully applied, or
      - All players are clamped at their volume boundaries
 
+After the loop, the server MUST round each final per-player volume to the nearest integer before sending commands.
+
 The loop only computes the final per-player volumes; once it completes, the server sends each player a single volume command — intermediate values are never sent.
 
-This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
+This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries and rounding allow.
 
 **Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to each player in the group that supports the `mute` command. Group volume changes do not affect any player's `muted` state (see the [player role](#player-messages)).
 
@@ -1513,7 +1534,7 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
   - `artwork_url?`: string - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
   - `year?`: integer - release year in YYYY format
   - `track?`: integer - track number on the album (1-indexed), absent if unknown or not applicable
-  - `progress?`: object - playback progress information. Omitting it clears the client's position, so include it in every `metadata` state that has a position to report. The server must send a new `metadata` state whenever playback state changes (play, pause, resume, seek, playback speed change)
+  - `progress?`: object - playback progress information. Omitting it clears the client's position, so include it in every `metadata` state that has a position to report. The server MUST send a new `metadata` state whenever playback state changes (play, pause, resume, seek, playback speed change), unless the change was already conveyed by a scheduled update
     - `track_progress`: integer - playback position in milliseconds since start of track, measured at `timestamp`
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
@@ -1592,7 +1613,11 @@ Each channel's configuration MUST match the channel's current [`client/state`](#
 
 ### Server → Client: Artwork (Binary)
 
-Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate). Rejection does not affect transfer state: a rejected announce still starts its transfer and rejected parts still advance it. A client that rejects an image discards its data but keeps the transfer's channel, `total_size`, and count of received bytes, so it can still tell which messages belong to the transfer and when it completes.
+Servers MUST NOT send artwork messages outside an active artwork stream.
+
+During an active stream, unavailable clients SHOULD discard otherwise valid image data and MUST NOT close solely for its arrival.
+
+During an active stream, clients discarding image data MUST still process announces and cancels and count each part's `data` bytes toward `total_size`.
 
 An image is transferred as an announce followed by the parts of the encoded image, all on its channel. The announce carries the image's total size and no image data.
 
@@ -1616,13 +1641,15 @@ At most one image transfer is in flight at a time across all of the role's chann
 
 A server SHOULD pace a transfer's parts instead of sending them back to back. Artwork is not time critical, so spreading the parts out keeps a large image from delaying the other roles the connection carries, such as `player@v1` audio chunks.
 
-The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**: the most recently announced image, from its announce until it becomes current. An announce discards that channel's pending image. The pending image becomes current once its transfer is complete and its timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), has been reached; artwork is never dropped for lateness. Clients MAY ease into a complete pending image around its timestamp (e.g. a cross-fade) or show it early (e.g. a coming-up display). On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images. A [`stream/start`](#server--client-streamstart) that changes a channel's configuration likewise discards that channel's pending image, and the server re-sends the image if it still applies.
+The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**: the most recently announced image, from its announce until it becomes current. An announce discards that channel's pending image. The pending image becomes current once its transfer is complete and its timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), has been reached; artwork is never dropped for lateness. Clients MAY ease into a complete pending image around its timestamp (e.g. a cross-fade) or show it early (e.g. a coming-up display). On [`stream/end`](#server--client-streamend) for the artwork role, clients MUST clear the current image and discard any pending image, so the channel no longer displays artwork. A [`stream/start`](#server--client-streamstart) that changes a channel's configuration likewise discards that channel's pending image, and the server re-sends the image if it still applies.
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty image for that channel: an announce with `total_size` `0`. An empty image follows the same rules as any other image: a future timestamp schedules the clear. Before a [`stream/start`](#server--client-streamstart) sets a channel's `source` to `'none'`, the server MUST clear that channel this way, using a past or present timestamp.
 
 **Cancel message:** A message consisting of only the `type` and `flags` bytes, with bit 0 set. It discards the channel's pending image, taking effect immediately; the current image is unaffected.
 
-**Malformed sequences** are protocol errors; the client MUST close the connection. They are: a message shorter than 2 bytes or exceeding the size cap above, an announce whose length is not 14 bytes, an announce received while a transfer is in flight, a cancel message longer than 2 bytes, a part received with no transfer in flight or on a channel other than the in-flight transfer's, a part whose `data` would extend past `total_size`, a nonzero reserved flag bit, and a message with bit 0 and bit 1 both set.
+**Malformed messages** are protocol errors: the client MUST close the connection. They are: a message shorter than 2 bytes or exceeding the size cap above, an announce whose length is not 14 bytes, a cancel message longer than 2 bytes, a nonzero reserved flag bit, and a message with bit 0 and bit 1 both set.
+
+**Malformed sequences within an active artwork stream** also require the client to close the connection: an announce received while a transfer is in flight, a part received with no transfer in flight or on a channel other than the in-flight transfer's, and a part whose `data` would extend past `total_size`.
 
 #### Server rules for scheduled artwork
 
@@ -1635,7 +1662,7 @@ This section describes messages specific to clients with the `visualizer` role, 
 
 Each visualizer binary message carries exactly one frame. The server emits messages in non-decreasing timestamp order so clients can process them in arrival order. Types the server cannot stream for the current source are silently omitted from the set echoed in [`stream/start`](#server--client-streamstart-visualizer-object). `beat` and `peak` are event-driven and not throttled by `rate_max`; all other types are periodic.
 
-Timestamps may decrease only after [`stream/clear`](#server--client-streamclear-visualizer) or when starting a new stream. Updating an existing stream with `stream/start` does not allow timestamps to decrease.
+Timestamps MAY decrease only after [`stream/clear`](#server--client-streamclear-visualizer) or when starting a new stream. Updating an existing stream with `stream/start` does not allow timestamps to decrease.
 
 **`beat` vs `peak`:** `beat` is a musical pulse derived from tempo/beat tracking, landing on the rhythmic grid with downbeats marking bar starts. Accurate beat detection often relies on offline analysis (e.g. neural beat trackers); servers without such analysis omit the type. `peak` is an energy onset detected live from the audio stream and fires on any transient (drum hits, cymbal crashes, attacks), independent of the rhythmic grid. A `beat` and a `peak` can fire on the same hit, or a `peak` can fire mid-bar with no `beat`.
 
@@ -1655,8 +1682,8 @@ The requested data types, frame-rate cap, and spectrum configuration are dynamic
 The `visualizer` object in [`client/state`](#client--server-clientstate) has this structure:
 
 - `visualizer`: object
-  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'spectrum'. May be empty to request no visualization data
-  - `rate_max`: positive integer - maximum periodic visualization frames per second per type (applies independently to `loudness`, `f_peak`, `spectrum`). Beat events are not throttled and are bounded by tempo. Clients should set this to their display refresh rate
+  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'spectrum'. MAY be empty to request no visualization data
+  - `rate_max`: positive integer - maximum periodic visualization frames per second per type (applies independently to `loudness`, `f_peak`, `spectrum`). Beat events are not throttled and are bounded by tempo.
   - `spectrum?`: object - spectrum configuration, required if `types` includes 'spectrum'
     - `n_disp_bins`: integer - number of display bins (i.e. bars on a graphical equalizer)
     - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins. 'mel' uses the HTK mel formula (`m = 2595 * log10(1 + f/700)`), 'log' uses base-10 logarithm of frequency, 'lin' uses linear frequency spacing
@@ -1683,21 +1710,25 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
 
 ### Server → Client: `stream/clear` visualizer
 
-When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients should clear all buffered visualization data and continue with data received after this message.
+When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients MUST clear all buffered visualization data and continue with data received after this message.
 
 ### Server → Client: Visualization Data (Binary)
 
-Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate). Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
+Servers MUST NOT send visualization messages outside an active visualizer stream.
+
+During an active stream, unavailable clients SHOULD discard otherwise valid visualization data and MUST NOT close solely for its arrival.
+
+Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
 
 - Byte 0: message type (uint8, one of the types listed below)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the [time filter](#clock-synchronization)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients MUST translate this server timestamp to their local clock using the [time filter](#clock-synchronization)
 - Remaining bytes: data, layout per type below; all `uint16` fields are big-endian
 
 Data whose timestamp is already in the past on arrival is dropped; stale visualization frames are never rendered.
 
 `loudness`, `spectrum` bins, and the `f_peak` amplitude use the full `uint16` range 0-65535, where 0 = silence and 65535 = full scale. Values are A-weighted and dB-scaled: -60 dB → 0, 0 dB → 65535, mapped linearly across that range.
 
-Message types `21`, `22`, and `23` are reserved for future visualizer types within the role's 16-23 allocation and must not be used by implementations.
+Message types `21`, `22`, and `23` are reserved for future visualizer types within the role's 16-23 allocation and MUST NOT be used by implementations.
 
 #### `loudness` — message type `16`
 
@@ -1707,13 +1738,13 @@ Overall A-weighted loudness in dB (see scaling above).
 
 #### `beat` — message type `17`
 
-- 1 byte: `uint8` flags. Bit 0 = downbeat (bar start). Bits 1-7 reserved, must be zero by the server, ignored by the client
+- 1 byte: `uint8` flags. Bit 0 = downbeat (bar start). Bits 1-7 reserved, MUST be set to zero by the server, ignored by the client
 
 Musical beat event. Bit 0 is only meaningful when [`stream/start`](#server--client-streamstart-visualizer-object) sets `tracks_downbeats: true`; otherwise it is always 0.
 
 #### `f_peak` — message type `18`
 
-- 2 bytes: `uint16` freq - dominant frequency in Hz (0 = no peak detected, amp must also be 0)
+- 2 bytes: `uint16` freq - dominant frequency in Hz (0 = no peak detected, amp MUST also be 0)
 - 2 bytes: `uint16` amp - amplitude (see scaling above)
 
 Tracks the dominant FFT bin, which is not always the fundamental: strong harmonics can dominate, so do not treat `f_peak` as the musical note being played.
@@ -1722,7 +1753,7 @@ Tracks the dominant FFT bin, which is not always the fundamental: strong harmoni
 
 - 2*n bytes: `uint16[n]` bins from low to high frequency. `n` = `n_disp_bins` in [`stream/start`](#server--client-streamstart-visualizer-object)
 
-Magnitude per display bin (see scaling above). Servers may impose an implementation-defined upper bound on `n_disp_bins` to keep per-frame size sensible.
+Magnitude per display bin (see scaling above). Servers MAY impose an implementation-defined upper bound on `n_disp_bins` to keep per-frame size sensible.
 
 #### `peak` — message type `20`
 
@@ -1739,12 +1770,12 @@ The `color` object in [`server/state`](#server--client-serverstate) has this str
 
 - `color`: object
   - `timestamp`: integer - server clock time in microseconds at which these colors take effect. A past or present timestamp describes the currently playing audio; a future timestamp schedules the update (see [Scheduled color updates](#scheduled-color-updates))
-  - `background_dark?`: integer[] - background color suitable for dark mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with white text and with `on_dark` (if also present).
-  - `background_light?`: integer[] - background color suitable for light mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with black text and with `on_light` (if also present).
+  - `background_dark?`: integer[] - background color suitable for dark mode as `[R, G, B]` with values 0-255. The server MUST ensure a minimum WCAG contrast ratio of 4.5:1 with white text and with `on_dark` (if also present).
+  - `background_light?`: integer[] - background color suitable for light mode as `[R, G, B]` with values 0-255. The server MUST ensure a minimum WCAG contrast ratio of 4.5:1 with black text and with `on_light` (if also present).
   - `primary?`: integer[] - the dominant color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
   - `accent?`: integer[] - a secondary or complementary color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
-  - `on_dark?`: integer[] - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_dark` (if also present) and with black text, so it can also serve as an alternative light background.
-  - `on_light?`: integer[] - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_light` (if also present) and with white text, so it can also serve as an alternative dark background.
+  - `on_dark?`: integer[] - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255. The server MUST ensure a minimum WCAG contrast ratio of 4.5:1 with `background_dark` (if also present) and with black text, so it can also serve as an alternative light background.
+  - `on_light?`: integer[] - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255. The server MUST ensure a minimum WCAG contrast ratio of 4.5:1 with `background_light` (if also present) and with white text, so it can also serve as an alternative dark background.
 
 #### Scheduled color updates
 
