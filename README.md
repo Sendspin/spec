@@ -1699,7 +1699,7 @@ To cancel a scheduled image, send a cancel message. A new future-timestamped ima
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data computed from the audio currently playing in the group.
 
-Each visualizer binary message carries exactly one frame. The server emits messages in non-decreasing timestamp order so clients can process them in arrival order. Types the server cannot stream for the current source are silently omitted from the set echoed in [`stream/start`](#server--client-streamstart-visualizer-object). `beat` and `peak` are event-driven and not throttled by `rate_max`; all other types are periodic.
+Each visualizer binary message carries exactly one frame. The server emits messages in non-decreasing timestamp order so clients can process them in arrival order. Types the server cannot stream for the current source are silently omitted from the set echoed in [`stream/start`](#server--client-streamstart-visualizer-object). `beat` and `peak` are event-driven; all other types are periodic. `rate_max` applies only to periodic types.
 
 Timestamps MAY decrease only after [`stream/clear`](#server--client-streamclear-visualizer) or when starting a new stream. Updating an existing stream with `stream/start` does not allow timestamps to decrease.
 
