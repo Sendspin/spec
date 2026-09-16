@@ -1,5 +1,9 @@
 # Contributing
 
+## Licensing and sign-off
+
+The specification is licensed under the [Community Specification License 1.0](LICENSE.md); its patent commitments are bounded by [SCOPE.md](SCOPE.md). By opening a pull request you accept the [Contributor License Agreement](CONTRIBUTOR-LICENSE-AGREEMENT.md), which covers your Contribution and, where applicable, your employer's rights. Tick the agreement box in the pull request template; pull requests without it are not merged. The Sendspin name and logo are trademarks of the Open Home Foundation, see [TRADEMARKS.md](TRADEMARKS.md).
+
 ## The spec is authored in split source files
 
 `README.md` is a generated single-page rendering of the spec. Do not edit it
@@ -31,7 +35,7 @@ The source files follow these rules. Check a change against them before proposin
 - **Edit the source files, never `README.md`.** `README.md` is generated; the pre-commit hook regenerates it and blocks direct edits.
 - **Every heading needs a unique anchor.** The build fails on two headings that produce the same anchor, and on a link to an anchor with no matching heading.
 - **Use one canonical name per term.** Where the Definitions section defines a term, body text uses exactly that name - not a synonym or a prefixed variant, unless the prefix disambiguates (`Sendspin client`, where the WebSocket client is a different thing). Prose names agree with the wire identifiers they describe.
-- **`**Note:**` blocks are non-normative.** Requirements - uppercase BCP 14 keywords (MUST, SHOULD, MAY, ...) - belong in body text. A note must read as a comment the reader can skip.
+- **`**Note:**` blocks are non-normative.** Requirements, whether or not they use uppercase BCP 14 keywords, belong in body text. A note must read as a comment the reader can skip.
 
 ## Pre-commit hook
 
