@@ -544,7 +544,9 @@ Servers SHOULD declare the minimal set of activities that reflects the connectio
 
 Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
-When a `server/activate` removes a role from `active_roles`, the server MUST first end that role's output by sending [`stream/end`](#server--client-streamend) for stream roles (`player`, `artwork`, `visualizer`), or a [`server/state`](#server--client-serverstate) with a null role object for state roles (`metadata`, `color`, `controller`) - so the client never holds live data for an inactive role.
+When a `server/activate` removes a stream role (`player`, `artwork`, `visualizer`) from `active_roles`, the server MUST first end that role's output by sending [`stream/end`](#server--client-streamend).
+
+When applying a `server/activate`, the client MUST immediately discard the current state and any pending scheduled update for every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role). This applies to explicit removals, implicit removals when the connection is no longer playback-capable, and replacement of an active role version. No preceding `server/state` is required. State for roles that remain active at the same version is unchanged.
 
 ### Client → Server: `client/time`
 
@@ -635,17 +637,15 @@ Server sends state updates to the client. Contains role-specific state objects.
 
 Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged and any pending scheduled update in place. For the `metadata` and `color` objects, a future `timestamp` defers when the state takes effect (see scheduled updates for [`metadata`](#scheduled-metadata-updates) and [`color`](#scheduled-color-updates)).
 
-After a `server/activate` adds or re-adds a role that defines a `server/state` object, the server MUST promptly send a `server/state` containing that role's current state, or `null` if there is no state to provide.
+After a `server/activate` adds or re-adds a role that defines a `server/state` object, the server MUST promptly send a `server/state` containing that role's current state. The server MUST NOT activate such a role until it can provide a complete state object as defined by that role, and MUST deactivate it if it can no longer do so.
 
 The server MUST promptly report changes to active roles' `server/state` objects. Scheduled updates taking effect and playback progress advancing as reported require no new message.
 
 The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry a past or present `timestamp` if the role object has one, so the client is brought up to date before any scheduled update follows.
 
-A role object set to `null` clears all of that role's state, taking effect immediately and discarding any pending scheduled update.
-
-- `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
-- `controller?`: object | null - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
-- `color?`: object | null - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
+- `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
+- `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
+- `color?`: object - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
