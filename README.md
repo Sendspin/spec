@@ -659,9 +659,9 @@ The server MUST promptly report changes to active roles' `server/state` objects.
 
 The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry a past or present `timestamp` if the role object has one, so the client is brought up to date before any scheduled update follows.
 
-- `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
-- `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
-- `color?`: object - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
+- `metadata?`: object - only if the `metadata` role is active ([see metadata state object details](#server--client-serverstate-metadata-object))
+- `controller?`: object - only if the `controller` role is active ([see controller state object details](#server--client-serverstate-controller-object))
+- `color?`: object - only if the `color` role is active ([see color state object details](#server--client-serverstate-color-object))
 
 [Application-specific roles](#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
