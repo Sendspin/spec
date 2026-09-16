@@ -466,7 +466,7 @@ The encrypted payload carried inside each Noise handshake message is a UTF-8 JSO
   - `psk_category`: 'lt' | 'pr' | 'sn' - the category the server is using the referenced PSK as: long-term, pairing, or Sentinel. A `psk_id` the client holds only under a different category is a lookup miss (see [Pre-Shared Key](#pre-shared-key)). The codes share one length, so the encrypted payload's length is independent of the category.
 - **Noise message 2 payload** (client → server): the empty object as the literal two bytes `{}` (not a zero-length Noise payload)
 
-A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a [silent failure](#failure-handling) and closes the WebSocket.
+A malformed inner handshake payload (not valid UTF-8 JSON of the shape above, including a `psk_category` outside the three defined codes) is a [silent failure](#failure-handling) and closes the WebSocket.
 
 After both handshake messages have been exchanged, both sides switch to Noise transport mode (all subsequent messages travel as the binary messages described above).
 
