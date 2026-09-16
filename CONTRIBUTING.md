@@ -1,5 +1,9 @@
 # Contributing
 
+## Licensing and sign-off
+
+The specification is licensed under the [Community Specification License 1.0](LICENSE.md); its patent commitments are bounded by [SCOPE.md](SCOPE.md). By opening a pull request you accept the [Contributor License Agreement](CONTRIBUTOR-LICENSE-AGREEMENT.md), which covers your Contribution and, where applicable, your employer's rights. Tick the agreement box in the pull request template; pull requests without it are not merged. The Sendspin name and logo are trademarks of the Open Home Foundation, see [TRADEMARKS.md](TRADEMARKS.md).
+
 ## The spec is authored in split source files
 
 `README.md` is a generated single-page rendering of the spec. Do not edit it
