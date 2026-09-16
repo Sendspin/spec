@@ -71,10 +71,11 @@ The first byte of every decrypted binary message is its message ID. IDs are assi
 | 8-11 | Artwork role |
 | 12-15 | Source role |
 | 16-23 | Visualizer role |
-| 24-191 | Reserved for future roles |
+| 24-27 | Announcement role |
+| 28-191 | Reserved for future roles |
 | 192-255 | Available for use by [application-specific roles](README.md#application-specific-roles) |
 
-Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24-191 range.
+Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 28-191 range.
 
 **Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 
@@ -203,9 +204,11 @@ Clients that can output audio SHOULD have the role `player`.
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
+  - `announcement@v1` - plays short client-specific announcement audio (e.g., voice-assistant responses, chimes, alerts) alongside or independent of media playback
 - `player@v1_support?`: object - required if `player@v1` is listed, absent otherwise ([see player@v1 support object details](roles/player/v1.md#client--server-clienthello-playerv1-support-object))
 - `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](roles/source/v1.md#client--server-clienthello-sourcev1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](roles/visualizer/v1.md#client--server-clienthello-visualizerv1-support-object))
+- `announcement@v1_support?`: object - required if `announcement@v1` is listed, absent otherwise ([see announcement@v1 support object details](roles/announcement/v1.md#client--server-clienthello-announcementv1-support-object))
 - `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method, and at most one pairing-code method may be listed (see [Pairing](pairing.md#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](pairing.md#unpaired-access)
   - `enabled`: boolean
@@ -250,7 +253,7 @@ Servers SHOULD declare the minimal set of activities that reflects the connectio
 
 Servers normally activate the client's [preferred](README.md#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
-When a `server/activate` removes a stream role (`player`, `artwork`, `visualizer`) that has an active stream from `active_roles`, the server MUST first end that role's output by sending [`stream/end`](#server--client-streamend).
+When a `server/activate` removes a stream role (`player`, `artwork`, `visualizer`, `announcement`) that has an active stream from `active_roles`, the server MUST first end that role's output by sending [`stream/end`](#server--client-streamend).
 
 When applying a `server/activate`, the client MUST immediately discard the current state and any pending scheduled update for every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role). This applies to explicit removals, implicit removals when the connection is no longer playback-capable, and replacement of an active role version. No preceding `server/state` is required. State for roles that remain active at the same version is unchanged.
 
@@ -290,6 +293,7 @@ Every message MUST carry `available` and the full state of each role object it i
 - `source?`: object - only if the `source` role is active ([see source state object details](roles/source/v1.md#client--server-clientstate-source-object))
 - `artwork?`: object - only if the `artwork` role is active ([see artwork state object details](roles/artwork/v1.md#client--server-clientstate-artwork-object))
 - `visualizer?`: object - only if the `visualizer` role is active ([see visualizer state object details](roles/visualizer/v1.md#client--server-clientstate-visualizer-object))
+- `announcement?`: object - only if the `announcement` role is active ([see announcement state object details](roles/announcement/v1.md#client--server-clientstate-announcement-object))
 
 [Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
@@ -376,6 +380,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 - `player?`: object - only if the `player` role is active ([see player object details](roles/player/v1.md#server--client-streamstart-player-object))
 - `artwork?`: object - only if the `artwork` role is active ([see artwork object details](roles/artwork/v1.md#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only if the `visualizer` role is active ([see visualizer object details](roles/visualizer/v1.md#server--client-streamstart-visualizer-object))
+- `announcement?`: object - only if the `announcement` role is active ([see announcement object details](roles/announcement/v1.md#server--client-streamstart-announcement-object))
 
 [Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
@@ -408,7 +413,7 @@ Servers MUST NOT send `stream/end` in these cases because it signals actual play
 
 The server MUST NOT send this message when no server-to-client streams are active.
 
-- `roles?`: non-empty string[] - roles to end streams for ('player', 'artwork', 'visualizer'). Every listed role MUST have an active stream. If omitted, ends all active streams
+- `roles?`: non-empty string[] - roles to end streams for ('player', 'artwork', 'visualizer', 'announcement'). Every listed role MUST have an active stream. If omitted, ends all active streams except an active `announcement` stream, which ends only when `announcement` is listed explicitly (see [announcement stream/end](roles/announcement/v1.md#server--client-streamend-announcement))
 
 [Application-specific roles](README.md#application-specific-roles) MAY also be included in this array (names starting with `_`).
 
