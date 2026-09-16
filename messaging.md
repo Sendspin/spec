@@ -177,7 +177,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 ### Server → Client: `server/hello`
 
-First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary message, message type `0`).
+First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
 - `name`: string - friendly name of the server
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
@@ -185,7 +185,7 @@ First message sent by the server after the Noise handshake completes. Sent as an
 
 ### Client → Server: `client/hello`
 
-Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary message, message type `0`). Contains information about the client's capabilities and roles.
+Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent once per connection as an encrypted message (binary message, message type `0`). Contains information about the client's capabilities and roles.
 
 Clients that can output audio SHOULD have the role `player`.
 

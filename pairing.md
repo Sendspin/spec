@@ -65,7 +65,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes with the pairing PSK
+    Note over Client,Server: Initial Noise handshake completes with the pairing PSK
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -73,7 +73,7 @@ sequenceDiagram
     Client->>Server: client/pair-init
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK, then sends server/activate.
 ```
 
 If a connection is already open under any other PSK - Sentinel or a [long-term PSK](README.md#definitions) - when the operator picks `pairing_psk`, the server first [re-handshakes](connection.md#re-handshake) to the pairing PSK before sending the `server/activate` shown above.
@@ -109,7 +109,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes with the Sentinel PSK
+    Note over Client,Server: Initial Noise handshake completes with the Sentinel PSK
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -137,7 +137,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK, then sends server/activate.
 ```
 
 **Binding values.** The Dynamic Pairing Code Flow introduces three values across two messages that bind the pairing code to the underlying Noise handshake:
@@ -197,7 +197,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes with the Sentinel PSK
+    Note over Client,Server: Initial Noise handshake completes with the Sentinel PSK
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -218,7 +218,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK, then sends server/activate.
 ```
 
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pairing_code_mismatch`.
