@@ -370,7 +370,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers. If a parameter change requires rebuffering (e.g., a sample rate change), the receiver handles this internally: it does not clear buffers unless its implementation requires it, and may document its specific behavior.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without ending the stream. Each role defines how data received under the previous configuration is handled.
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `player?`: object - only if the `player` role is active ([see player object details](roles/player/v1.md#server--client-streamstart-player-object))
