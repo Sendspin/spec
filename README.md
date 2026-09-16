@@ -296,9 +296,9 @@ Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to recei
 
 The server MAY rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
-The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary messages inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
+The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary messages inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. Once the new keys are in place, the server MUST send [`server/activate`](#server--client-serveractivate) as its first message under the new keys. Neither [`server/hello`](#server--client-serverhello) nor [`client/hello`](#client--server-clienthello) is re-sent. That activation is a subsequent one on the same connection. The activation rules, including those for omitted `active_roles`, apply under the newly matched PSK.
 
-The server MUST NOT start new application messages after sending Noise message 1, nor the client after receiving it, except for the handshake and hello/activation exchange. This restriction ends when the server sends, or the client receives, the new `server/activate`.
+The server MUST NOT start new application messages after sending Noise message 1, nor the client after receiving it, except for the handshake and `server/activate`. This restriction ends when the server sends, or the client receives, the new `server/activate`.
 
 The server MUST tolerate valid old-key application messages received before Noise message 2, since the client may have sent them before receiving message 1. It MAY discard them without processing or responding.
 
@@ -483,7 +483,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 ### Server → Client: `server/hello`
 
-First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary message, message type `0`).
+First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
 - `name`: string - friendly name of the server
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
@@ -491,7 +491,7 @@ First message sent by the server after the Noise handshake completes. Sent as an
 
 ### Client → Server: `client/hello`
 
-Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary message, message type `0`). Contains information about the client's capabilities and roles.
+Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent once per connection as an encrypted message (binary message, message type `0`). Contains information about the client's capabilities and roles.
 
 Clients that can output audio SHOULD have the role `player`.
 
@@ -832,7 +832,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes with the pairing PSK
+    Note over Client,Server: Initial Noise handshake completes with the pairing PSK
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -840,7 +840,7 @@ sequenceDiagram
     Client->>Server: client/pair-init
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK, then sends server/activate.
 ```
 
 If a connection is already open under any other PSK - Sentinel or a [long-term PSK](#definitions) - when the operator picks `pairing_psk`, the server first [re-handshakes](#re-handshake) to the pairing PSK before sending the `server/activate` shown above.
@@ -876,7 +876,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes with the Sentinel PSK
+    Note over Client,Server: Initial Noise handshake completes with the Sentinel PSK
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -904,7 +904,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK, then sends server/activate.
 ```
 
 **Binding values.** The Dynamic Pairing Code Flow introduces three values across two messages that bind the pairing code to the underlying Noise handshake:
@@ -964,7 +964,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes with the Sentinel PSK
+    Note over Client,Server: Initial Noise handshake completes with the Sentinel PSK
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -985,7 +985,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK, then sends server/activate.
 ```
 
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pairing_code_mismatch`.
