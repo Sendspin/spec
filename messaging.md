@@ -27,6 +27,12 @@ All JSON messages have a `type` field identifying the message and a `payload` ob
 
 **Forward compatibility.** Clients and servers MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients and servers MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](README.md#application-specific-roles) objects a message explicitly permits, or support objects in `client/hello` for advertised application-specific role versions (e.g., `player@_experimental_support`).
 
+Clients and servers MUST ignore JSON messages with an unrecognized `type`, provided the message is a valid JSON object with a `type` string and a `payload` object. They MUST also ignore binary messages whose ID they do not implement. These rules apply only when the [initial handshake](#communication) and [re-handshake](connection.md#re-handshake) rules allow application messages.
+
+Before sending messages or fields for a feature added by a future revision of this specification, senders MUST confirm support through role activation or explicit capability negotiation. The feature's specified negotiation fields are exempt from this requirement. Not receiving an error does not prove that the receiver understood or acted on the message. Future revisions of this specification MAY define negotiation fields in existing messages that older receivers can ignore. See [Protocol evolution](README.md#protocol-evolution).
+
+Noise authentication and the validation, direction, and sequencing rules for recognized messages still apply. An ID the receiver implements is still recognized when its role is inactive. An unrecognized value in a known field follows that field's rules, not the rule for ignoring unrecognized fields.
+
 Message format example:
 
 ```json
@@ -56,7 +62,7 @@ Message format example:
 
 WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each complete binary message carries exactly one Noise transport message; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
-Discarding a binary role payload MUST NOT bypass Noise processing, Sendspin fragment reassembly, or the role's required message checks.
+Receivers that discard a binary role payload MUST still process Noise messages, follow the fragmentation rules below, and perform the role's required message checks.
 
 ### Binary Message ID Structure
 
@@ -99,6 +105,8 @@ The concatenated `data` from all fragments yields the original message's payload
 
 **Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
 
+The [ignore rules](#communication) also apply to fragmented messages. If the receiver does not implement `orig_type`, it MAY discard each fragment's `data` instead of allocating a reassembly buffer. It MUST still authenticate every Noise transport message, track the fragment sequence, and enforce the malformed-sequence rules below. The last fragment clears the sequence state. The discarded message is not dispatched.
+
 **Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment binary message received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
 
 ## Clock Synchronization
@@ -136,7 +144,7 @@ First message sent by the client after the WebSocket connection is established. 
 - `version`: integer (MUST be `1`) - version of the core message format that the client implements (independent of role versions)
 - `suite`: '25519_ChaChaPoly_SHA256' | '25519_AESGCM_SHA256' - Noise cipher suite the client picked for this connection. See [Cipher Suites](connection.md#cipher-suites)
 
-`version` (here and in [`server/init`](#server--client-serverinit)) is an exact-match field naming the single core message format the sender speaks, not a minimum-supported version. Under this specification both sides send `1` and abort the handshake on any other value (see [Failure Handling](connection.md#failure-handling)); a future revision that changes the core format will bump the value and define its own negotiation semantics.
+`version` (here and in [`server/init`](#server--client-serverinit)) is an exact-match field naming the single core message format the sender speaks, not a minimum-supported version. Under this specification both sides send `1` and abort the handshake on any other value (see [Failure Handling](connection.md#failure-handling)). A future revision that requires a new core version under [Protocol evolution](README.md#protocol-evolution) will use a new value and define how it is negotiated.
 
 ### Server → Client: `server/init`
 
@@ -250,7 +258,11 @@ Servers SHOULD declare the minimal set of activities that reflects the connectio
 
 Servers normally activate the client's [preferred](README.md#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
-When a `server/activate` removes a stream role (`player`, `artwork`, `visualizer`) that has an active stream from `active_roles`, the server MUST first end that role's output by sending [`stream/end`](#server--client-streamend).
+Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
+
+When applying that activation, the client MUST stop the removed role's remaining output, clear its buffers, and release temporary output effects applied by that role, such as ducking. This applies even if an earlier `stream/end` allowed buffered data to finish playing.
+
+Both requirements apply to explicit removals, implicit removals when the connection is no longer playback-capable, and replacement of an active role version.
 
 When applying a `server/activate`, the client MUST immediately discard the current state and any pending scheduled update for every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role). This applies to explicit removals, implicit removals when the connection is no longer playback-capable, and replacement of an active role version. No preceding `server/state` is required. State for roles that remain active at the same version is unchanged.
 
@@ -398,7 +410,11 @@ The server MUST NOT send this message when no targeted streams are active.
 
 ### Server → Client: `stream/end`
 
-Ends the stream for one or more roles. When received, clients MUST stop output and clear buffers for the specified roles. This message is expected to be sent when playback is over and the queue is empty. Specifically:
+Ends the stream for one or more roles. Each side MUST treat the targeted streams as inactive once it sends or receives this message, even if buffered output continues.
+
+For each specified role, clients MUST stop output and clear its buffers unless that role explicitly defines different completion behavior. In that case, clients MUST follow the role's rules, such as finishing playback of buffered data.
+
+For roles following the media queue, this message is expected to be sent when playback is over and the queue is empty. Specifically:
 
 - **Track transitions** (a track ends and the next begins naturally): stream commands SHOULD NOT be sent, except `stream/start` to update the existing stream configuration. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
 - **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
