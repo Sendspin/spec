@@ -676,7 +676,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers. If a parameter change requires rebuffering (e.g., a sample rate change), the receiver handles this internally: it does not clear buffers unless its implementation requires it, and may document its specific behavior.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without ending the stream. Each role defines how data received under the previous configuration is handled.
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `player?`: object - only if the `player` role is active ([see player object details](#server--client-streamstart-player-object))
@@ -1270,6 +1270,10 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
 The format MUST be one the client listed in its [`supported_formats`](#client--server-clienthello-playerv1-support-object).
+
+When the `player` object changes the format of an active stream, chunks sent before this message are in the previous format and chunks sent after it are in the new format. Servers MUST timestamp the first chunk in the new format to follow the last chunk in the previous format on the existing timeline, and MUST NOT resend audio already sent.
+
+Clients MUST keep buffered chunks and decode each chunk in the format that was in effect when it was received. A player that cannot switch its output between the formats it lists without a gap SHOULD list a single `sample_rate` and `channels` in [`supported_formats`](#client--server-clienthello-playerv1-support-object), in which case the server resamples for it.
 
 ### Server → Client: `stream/clear` player
 
