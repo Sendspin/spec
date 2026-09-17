@@ -343,7 +343,9 @@ All JSON messages have a `type` field identifying the message and a `payload` ob
 
 **Forward compatibility.** Clients and servers MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients and servers MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](#application-specific-roles) objects a message explicitly permits, or support objects in `client/hello` for advertised application-specific role versions (e.g., `player@_experimental_support`).
 
-Clients and servers MUST ignore JSON messages with an unrecognized `type`, provided the message is a valid JSON object with a `type` string and a `payload` object. They MUST also ignore binary messages whose ID they do not implement. These rules apply only when the [initial handshake](#communication) and [re-handshake](#re-handshake) rules allow application messages.
+Clients and servers MUST ignore JSON messages with an unrecognized `type`, provided the message is a valid JSON object with a `type` string and a `payload` object. They MUST also ignore binary messages whose ID they do not implement. These rules apply after the server sends, or the client receives, the initial [`server/activate`](#server--client-serveractivate).
+
+During [re-handshake](#re-handshake), these ignore rules apply only to messages allowed by the re-handshake rules, including valid messages encrypted with the previous session keys and received by the server before Noise message 2.
 
 Before sending messages or fields for a feature added by a future revision of this specification, senders MUST confirm support through role activation or explicit capability negotiation. The feature's specified negotiation fields are exempt from this requirement. Not receiving an error does not prove that the receiver understood or acted on the message. Future revisions of this specification MAY define negotiation fields in existing messages that older receivers can ignore. See [Protocol evolution](#protocol-evolution).
 
@@ -574,13 +576,16 @@ Servers SHOULD declare the minimal set of activities that reflects the connectio
 
 Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
+Role removal includes explicit removal from `active_roles`, implicit removal when the connection is no longer playback-capable, and replacement of an active role version.
+
 Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
 
-When applying that activation, the client MUST stop the removed role's remaining output, clear its buffers, and release temporary output effects applied by that role, such as ducking. This applies even if an earlier `stream/end` allowed buffered data to finish playing.
+When applying a `server/activate`, the client MUST:
 
-Both requirements apply to explicit removals, implicit removals when the connection is no longer playback-capable, and replacement of an active role version.
+- For every removed server-to-client stream role, stop its remaining output, clear its buffers, and release temporary output effects applied by that role, such as ducking. This applies even if an earlier `stream/end` allowed buffered data to finish playing.
+- For every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role), immediately discard the current state and any pending scheduled update. No preceding `server/state` is required.
 
-When applying a `server/activate`, the client MUST immediately discard the current state and any pending scheduled update for every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role). This applies to explicit removals, implicit removals when the connection is no longer playback-capable, and replacement of an active role version. No preceding `server/state` is required. State for roles that remain active at the same version is unchanged.
+State for roles that remain active at the same version is unchanged.
 
 Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
 
@@ -730,7 +735,7 @@ Ends the stream for one or more roles. Each side MUST treat the targeted streams
 
 For each specified role, clients MUST stop output and clear its buffers unless that role explicitly defines different completion behavior. In that case, clients MUST follow the role's rules, such as finishing playback of buffered data.
 
-For roles following the media queue, this message is expected to be sent when playback is over and the queue is empty. Specifically:
+For roles following a media queue, this message is expected to be sent when playback is over and the queue is empty. Specifically:
 
 - **Track transitions** (a track ends and the next begins naturally): stream commands SHOULD NOT be sent, except `stream/start` to update the existing stream configuration. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
 - **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
