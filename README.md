@@ -207,7 +207,7 @@ If clients prefer to initiate the connection instead of waiting for the server t
 - TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
 - TXT record: `name` key specifying the friendly name of the server (OPTIONAL)
 
-Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
+Clients SHOULD discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
 The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
 
