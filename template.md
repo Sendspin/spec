@@ -147,6 +147,16 @@ Custom roles outside the specification start with `_` and MUST include an explic
 
 Their binary message IDs come from the unmanaged 192-255 range: an application-specific role's own definition assigns its IDs, and a client MUST NOT advertise two roles with conflicting IDs.
 
+## Protocol evolution
+
+This section describes how future revisions of this specification can add standard protocol features, roles, and role versions. It does not grant additional permissions to [application-specific roles](#application-specific-roles).
+
+Core and role versions define behavior as well as message formats. If a new feature is not selected, existing behavior MUST remain unchanged. A change that breaks an existing role's contract requires a new role version. A core change that breaks existing behavior requires a new core version unless it can apply only when both peers explicitly opt in.
+
+Future revisions of this specification MAY add optional information if older receivers can ignore it without changing the message's meaning. If a new feature needs the receiver to behave differently, the sender MUST confirm support through role activation or an explicitly defined capability negotiation before relying on that behavior. Matching core versions, the peer's software version, and the absence of an error do not confirm support. New features SHOULD use role support objects for role-specific capabilities.
+
+A feature that changes connection-wide behavior, such as admission or ownership, MUST define how both peers opt in and what happens if they do not. It MUST NOT break the protocol rules that apply to peers on other connections that have not opted in. Support for a role MUST NOT be taken as support for a separate connection-wide feature unless that role version explicitly includes it.
+
 <!-- include: connection.md -->
 <!-- include: messaging.md -->
 <!-- include: pairing.md -->
