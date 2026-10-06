@@ -300,7 +300,7 @@ with `label` `"sendspin-pair-psk-wrap-v1"` for `wrapped_psk` and `"sendspin-pair
 
 ### Protocol Errors
 
-A condition during pairing that no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, an entered code that fails the binding check, a `wrapped_nonce_B` or `wrapped_psk` that fails to decrypt - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
+A condition during pairing that no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, an entered code that fails the binding check, a `wrapped_nonce_B` or `wrapped_psk` that fails to decrypt, a delivered long-term PSK equal to the Sentinel PSK or to the pairing PSK the connection is keyed by - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
 
 ### Client → Server: `client/hello` pair-method descriptor
 
