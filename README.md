@@ -456,7 +456,7 @@ Every client and server MUST implement all messages in this section regardless o
 
 [Pairing](#pairing) messages are REQUIRED for all servers; clients implement the subset matching their advertised pairing methods.
 
-WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order.
+WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order. Binary role data MUST NOT delay `server/command` or `server/state` messages: the server sends them, together with any earlier `server/activate` it has not yet sent, ahead of any binary role data it has not started transmitting.
 
 ### Client → Server: `client/init`
 
