@@ -1302,7 +1302,7 @@ The format MUST be one the client listed in its [`supported_formats`](#client--s
 
 When the `player` object changes the format of an active stream, chunks sent before this message are in the previous format and chunks sent after it are in the new format. Servers SHOULD timestamp the first chunk in the new format to start where the last chunk in the previous format ends on the existing timeline, MUST NOT timestamp it to start earlier, and MUST NOT resend audio already sent.
 
-Clients MUST keep buffered chunks and decode each chunk in the format that was in effect when it was received. A player that cannot switch its output between the formats it lists without a gap SHOULD list a single `sample_rate` and `channels` in [`supported_formats`](#client--server-clienthello-playerv1-support-object), in which case the server resamples for it.
+Clients MUST keep buffered chunks and decode each chunk in the format that was in effect when it was received, and SHOULD switch their output between formats without adding a gap. A player that cannot switch its output between the formats it lists without a gap SHOULD list a single `sample_rate` and `channels` in [`supported_formats`](#client--server-clienthello-playerv1-support-object), in which case the server resamples for it.
 
 ### Server → Client: `stream/clear` player
 
