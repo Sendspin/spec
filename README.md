@@ -162,7 +162,7 @@ Sendspin has two standard ways to establish connections: Server and Client initi
 
 Servers MUST support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
 
-The WebSocket transport MUST be plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
+Connections to an address advertised via mDNS MUST use plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
 
 ### Server Initiated Connections
 
