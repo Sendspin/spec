@@ -129,7 +129,7 @@ Delay accruing after that point - transport send buffering, an earlier fragmente
 
 ### Receive timestamps
 
-A receiver's receive time for a message is when the message's last byte arrived at the transport; for a [fragmented](#fragmentation) message, the last byte of its final fragment. Receivers SHOULD take it as close to that arrival as their transport permits, and MUST NOT take it after application-level queueing, decryption, or parsing.
+A receiver's receive time for a message is when the message's last byte arrived at the transport; for a [fragmented](#fragmentation) message, the last byte of its final fragment. This applies to the server's `server_received`, the client's receive time for [`server/time`](#server--client-servertime), and the player's `arrival` for audio chunks. Receivers SHOULD take it as close to that arrival as their transport permits, and MUST NOT take it later than when their WebSocket implementation delivers the WebSocket message carrying that last byte.
 
 ## Core messages
 This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
