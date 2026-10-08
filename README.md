@@ -10,6 +10,8 @@
 
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
+This document is the normative specification. The non-normative [implementation guide](https://www.sendspin-audio.com/build/guide/) explains how to build a client or server on top of it, including the user experience around pairing.
+
 ## Licensing and Trademarks
 
 Sendspin is an open, royalty-free protocol that anyone may implement. This specification is licensed under the [Community Specification License 1.0](https://github.com/Sendspin/spec/blob/main/LICENSE.md), which includes a royalty-free patent license from every contributor for implementations of the specification within its [Scope](https://github.com/Sendspin/spec/blob/main/SCOPE.md). Contributions are accepted under the [Contributor License Agreement](https://github.com/Sendspin/spec/blob/main/CONTRIBUTOR-LICENSE-AGREEMENT.md).
@@ -207,7 +209,7 @@ If clients prefer to initiate the connection instead of waiting for the server t
 - TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
 - TXT record: `name` key specifying the friendly name of the server (OPTIONAL)
 
-Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
+Clients SHOULD discover the server through mDNS. A client that discovers the server initiates a WebSocket connection using the advertised address and path.
 
 The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
 
