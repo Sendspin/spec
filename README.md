@@ -10,6 +10,8 @@
 
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
+This document is the normative specification. The non-normative [implementation guide](https://www.sendspin-audio.com/build/guide/) explains how to build a client or server on top of it, including the user experience around pairing.
+
 ## Licensing and Trademarks
 
 Sendspin is an open, royalty-free protocol that anyone may implement. This specification is licensed under the [Community Specification License 1.0](https://github.com/Sendspin/spec/blob/main/LICENSE.md), which includes a royalty-free patent license from every contributor for implementations of the specification within its [Scope](https://github.com/Sendspin/spec/blob/main/SCOPE.md). Contributions are accepted under the [Contributor License Agreement](https://github.com/Sendspin/spec/blob/main/CONTRIBUTOR-LICENSE-AGREEMENT.md).
@@ -429,9 +431,9 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
 
-Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
