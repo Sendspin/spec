@@ -113,13 +113,85 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. A known-good baseline is a burst of 8 `client/time` messages about every 10 seconds, each sent after the reply to the previous one arrives, with only the burst's measurement that has the lowest [`max_error`](#time-filter) fed into the filter.
 
-Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
-Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
+Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
 
 A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
+
+### Time filter
+
+The time filter estimates `offset`, the server clock minus the client clock, and `drift`, the rate at which `offset` changes. All times are in microseconds, and the filter keeps its state in double-precision floating point.
+
+Each `server/time` response gives one measurement. With `T1` as `client_transmitted`, `T2` as `server_received`, `T3` as `server_transmitted`, and `T4` as the client's local time when the response arrives (see [Transmit timestamps](#transmit-timestamps)):
+
+```
+measurement = ((T2 - T1) + (T3 - T4)) / 2
+max_error   = ((T4 - T1) - (T3 - T2)) / 2
+time_added  = T4
+```
+
+All four timestamps are integers, and `/ 2` is integer division truncating toward zero. `measurement` is the offset this exchange observed, and `max_error`, half the round-trip delay, is the worst-case error of that offset when the network delays in the two directions differ.
+
+#### Time filter parameters
+
+Clients SHOULD use these parameter values:
+
+| Parameter | Value | Purpose |
+|---|---|---|
+| `process_std_dev` | 0.0 | Offset random-walk diffusion, in µs per √µs |
+| `drift_process_std_dev` | 1e-11 | Drift random-walk diffusion, in 1 per √µs |
+| `forget_factor` | 2.0 | Value greater than 1 whose square scales the covariances on a large residual |
+| `adaptive_cutoff` | 3.0 | Multiple of `max_error` above which a residual is large |
+| `min_samples` | 100 | Value `count` must reach before adaptive forgetting applies |
+| `drift_significance_threshold` | 2.0 | Signal-to-noise ratio `drift` must exceed before conversions apply it |
+| `max_error_scale` | 0.5 | Scale from `max_error` to the measurement standard deviation |
+
+#### Time filter update
+
+The filter state is `offset`, `drift`, the offset variance `P_oo`, the offset-drift covariance `P_od`, the drift variance `P_dd`, `last_update`, `count`, and `use_drift`. A new filter starts with `P_oo` at infinity, `use_drift` false, and every other value at 0.
+
+For each measurement:
+
+1. If `time_added <= last_update`, discard the measurement. Otherwise set `dt = time_added - last_update` and `last_update = time_added`.
+2. Set the measurement variance `R = (max_error_scale * max_error)^2`.
+3. If `count` is 0, set `offset = measurement`, `P_oo = R`, `drift = 0`, and `count = 1`, and skip the remaining steps.
+4. If `count` is 1, set `drift = (measurement - offset) / dt` and `P_dd = (P_oo + R) / dt^2`, then `offset = measurement`, `P_oo = R`, and `count = 2`, and skip the remaining steps.
+5. Predict from the current state:
+   ```
+   offset_p = offset + drift * dt
+   P_oo_p   = P_oo + 2 * P_od * dt + P_dd * dt^2 + process_std_dev^2 * dt
+   P_od_p   = P_od + P_dd * dt
+   P_dd_p   = P_dd + drift_process_std_dev^2 * dt
+   ```
+6. Set the residual `y = measurement - offset_p`. If `count < min_samples`, increment `count`. Otherwise, if `|y| > adaptive_cutoff * max_error`, multiply `P_oo_p`, `P_od_p`, and `P_dd_p` by `forget_factor^2`.
+7. Correct the state:
+   ```
+   S      = P_oo_p + R
+   K_o    = P_oo_p / S
+   K_d    = P_od_p / S
+   offset = offset_p + K_o * y
+   drift  = drift + K_d * y
+   P_oo   = P_oo_p - K_o * P_oo_p
+   P_od   = P_od_p - K_d * P_oo_p
+   P_dd   = P_dd_p - K_d * P_od_p
+   ```
+8. Set `use_drift` to whether `drift^2 > drift_significance_threshold^2 * P_dd`.
+
+`sqrt(P_oo)` is the standard deviation of the offset estimate in microseconds.
+
+#### Time conversion
+
+With `d` as `drift` when `use_drift` is true and 0 otherwise:
+
+```
+compute_server_time(t_client) = t_client + round(offset + d * (t_client - last_update))
+compute_client_time(t_server) = round((t_server - offset + d * last_update) / (1 + d))
+```
+
+`round` rounds to the nearest integer, with halves rounded away from zero. Apart from rounding, `compute_client_time` is the inverse of `compute_server_time`.
 
 ### Transmit timestamps
 
