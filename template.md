@@ -11,7 +11,7 @@
 
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
-This document is the normative specification. The non-normative [implementation guide](https://www.sendspin-audio.com/build/guide/) explains how to build a client or server on top of it, including the user experience expected around pairing, and is the place for guidance that does not belong on the wire.
+This document is the normative specification. The non-normative [implementation guide](https://www.sendspin-audio.com/build/guide/) explains how to build a client or server on top of it, including the user experience around pairing.
 
 ## Licensing and Trademarks
 
