@@ -164,7 +164,7 @@ Sendspin has two standard ways to establish connections: Server and Client initi
 
 Servers MUST support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
 
-The WebSocket transport MUST be plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
+Connections to an address advertised via mDNS MUST use plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
 
 ### Server Initiated Connections
 
@@ -427,7 +427,7 @@ The concatenated `data` from all fragments yields the original message's payload
 
 The [ignore rules](#communication) also apply to fragmented messages. If the receiver does not implement `orig_type`, it MAY discard each fragment's `data` instead of allocating a reassembly buffer. It MUST still authenticate every Noise transport message, track the fragment sequence, and enforce the malformed-sequence rules below. The last fragment clears the sequence state. The discarded message is not dispatched.
 
-**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment binary message received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
+**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment binary message received while a fragmented message is in flight, a nonzero reserved flag bit, an `orig_type` of `1`, a fragment missing its `flags` byte, and a first fragment missing its `orig_type` byte.
 
 ## Clock Synchronization
 
@@ -435,7 +435,7 @@ Clients send `client/time` messages to maintain an accurate mapping between thei
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
-Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
+Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
 
 A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
 
@@ -443,7 +443,7 @@ A player MUST NOT report `available: true` until its time filter has converged e
 
 The time filter estimates `offset`, the server clock minus the client clock, and `drift`, the rate at which `offset` changes. All times are in microseconds, and the filter keeps its state in double-precision floating point.
 
-Each `server/time` response gives one measurement. With `T1` as `client_transmitted`, `T2` as `server_received`, `T3` as `server_transmitted`, and `T4` as the client's local time when the response arrives (see [Transmit timestamps](#transmit-timestamps)):
+Each `server/time` response gives one measurement. With `T1` as `client_transmitted`, `T2` as `server_received`, `T3` as `server_transmitted`, and `T4` as the client's receive time for the response (see [Receive timestamps](#receive-timestamps)):
 
 ```
 measurement = ((T2 - T1) + (T3 - T4)) / 2
@@ -517,7 +517,9 @@ Two things report when the server transmitted a message: the `server_transmitted
 
 Delay accruing after that point - transport send buffering, an earlier fragmented message still in flight, link contention - is not represented in the value and is observed by the client as network delay.
 
-A client measuring transit takes its `arrival` time for the message once the message is available to the application: after AEAD decryption, and after reassembly for a fragmented message. Both ends of the measurement therefore sit at the application boundary.
+### Receive timestamps
+
+A receiver's receive time for a message is when the message's last byte arrived at the transport; for a [fragmented](#fragmentation) message, the last byte of its final fragment. This applies to the server's `server_received`, the client's receive time for [`server/time`](#server--client-servertime), and the player's `arrival` for audio chunks. Receivers SHOULD take it as close to that arrival as their transport permits, and MUST NOT take it later than when their WebSocket implementation delivers the WebSocket message carrying that last byte.
 
 ## Core messages
 This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
@@ -1343,7 +1345,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
 
 **Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
 
-**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Transmit timestamps](#transmit-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
+**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Receive timestamps](#receive-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
 **Format preference:** When `format` changes while a `player` stream is active, the server re-derives the stream format and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the preference applies to the next stream the server starts (see [`stream/start`](#server--client-streamstart)). Clients can use this to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
