@@ -429,7 +429,7 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. A known-good baseline is a burst of 8 `client/time` messages about every 10 seconds, each sent after the reply to the previous one arrives, with only the burst's measurement that has the lowest [`max_error`](#time-filter) fed into the filter.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients SHOULD send them in bursts, sending each message after the reply to the previous one arrives, and SHOULD feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Bursts SHOULD contain 8 messages and SHOULD start about every 10 seconds.
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
