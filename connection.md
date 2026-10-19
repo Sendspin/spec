@@ -47,7 +47,7 @@ The client applies an activation that conflicts with no connection or wins again
 
 A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
 
-A displaced connection receives [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](pairing.md#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected connection receives [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](pairing.md#client--server-pairabort) reason `concurrent_attempt` if the rejected activation declares `'pairing'`). The client then closes the connection.
+A displaced connection receives [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](pairing.md#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected connection, provisional or admitted, receives [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](pairing.md#client--server-pairabort) reason `concurrent_attempt` if the rejected activation declares `'pairing'`). The client then closes the connection.
 
 ### Client Initiated Connections
 
