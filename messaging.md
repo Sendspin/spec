@@ -155,7 +155,7 @@ The filter state is `offset`, `drift`, the offset variance `P_oo`, the offset-dr
 
 For each measurement:
 
-1. If `time_added <= last_update`, discard the measurement. Otherwise set `dt = time_added - last_update` and `last_update = time_added`.
+1. If `time_added <= last_update` or `max_error <= 0`, discard the measurement. Otherwise set `dt = time_added - last_update` and `last_update = time_added`.
 2. Set the measurement variance `R = (max_error_scale * max_error)^2`.
 3. If `count` is 0, set `offset = measurement`, `P_oo = R`, `drift = 0`, and `count = 1`, and skip the remaining steps.
 4. If `count` is 1, set `drift = (measurement - offset) / dt` and `P_dd = (P_oo + R) / dt^2`, then `offset = measurement`, `P_oo = R`, and `count = 2`, and skip the remaining steps.
