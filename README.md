@@ -182,24 +182,32 @@ Clients MUST NOT manually connect to servers while advertising `_sendspin._tcp`.
 
 #### Multiple servers (server-initiated)
 
-A client holds at most one admitted connection at a time, except where noted below, classified by the highest-ranked activity in its declared [`activities`](#server--client-serveractivate); from highest to lowest:
+A client admits connections by the [`activities`](#server--client-serveractivate) they declare:
+
+- At most one admitted connection has `'playback'` in its `activities`, and at most one has `'pairing'`. One connection MAY have both.
+- A connection with empty `activities` is admitted only while no other connection is admitted.
+
+A client MAY also admit only one connection at a time.
+
+Clients MUST persistently store the `server_id` of the server that most recently held an admitted connection while `'playback'` was among its `activities` (the "last-playback server").
+
+When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its activities. The client arbitrates that activation and every later one, and MUST NOT arbitrate an activation that is not [admissible](#server--client-serveractivate).
+
+An activation conflicts with another admitted connection when both admitted, with the activating connection holding the activities the activation declares, would break one of the rules above. On a client that admits only one connection at a time, an activation on a provisional connection always conflicts with the admitted connection. The client compares the activating connection with each connection it conflicts with, classifying each by the highest-ranked activity in its `activities`, and the activating connection by those the activation declares, from highest to lowest:
 
 - `'playback'`
 - `'pairing'`
 
-A connection with empty `activities` ranks lowest.
+A connection with empty `activities` ranks lowest. The activating connection wins when it ranks higher or equal, and loses when it ranks lower. Two exceptions:
 
-Clients MUST persistently store the `server_id` of the server that most recently held the admitted connection while `'playback'` was among its `activities` (the "last-playback server").
+- A connection with a [pairing attempt](#entering-and-leaving-pairing) in progress is not displaced: the activating connection loses against it.
+- When both connections have empty `activities`, the activating connection wins only if its `server_id` matches the last-playback server (and the other's does not).
 
-When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its priority. The client MUST NOT apply the priority rules to an activation that is not [admissible](#server--client-serveractivate). The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Three exceptions:
+The client applies an activation that conflicts with no connection or wins against every connection it conflicts with, admitting its connection if provisional, and displaces those connections. Otherwise it rejects the activating connection.
 
-- A [pairing attempt](#entering-and-leaving-pairing) is not displaced by an incoming `'playback'` or `'pairing'` connection.
-- When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
-- A client MAY admit one incoming `'pairing'` connection alongside the admitted `'playback'` connection, holding both. A client that does not admit both connections rejects the incoming with [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` and closes the connection. While both are held, further incoming connections are arbitrated against the `'playback'` holder. When a later `server/activate` drops `'pairing'` from that connection's `activities`, the client arbitrates it against the `'playback'` holder as if it were incoming.
+A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
 
-Subsequent `server/activate` updates do not otherwise trigger arbitration, even when a connection escalates its activities. A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
-
-A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
+A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if the rejected activation declares `'pairing'`). The client then closes the connection.
 
 ### Client Initiated Connections
 
@@ -1204,7 +1212,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 
 - `reason`: string - one of:
   - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
-  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client does not admit a pairing connection alongside its current admitted connection (see [Multiple servers](#multiple-servers-server-initiated))
+  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client rejected or displaced this pairing (see [Multiple servers](#multiple-servers-server-initiated))
   - `method_not_supported` (client) - the server's activity set and `pairing.method` are not a permitted combination for the matched PSK, or `pairing.method` names a method the client does not currently offer, or `pairing.format` names an emission format the client does not currently offer
   - `pairing_code_mismatch` (client or server) - PAKE key-confirmation failed
   - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
