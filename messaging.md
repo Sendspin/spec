@@ -264,7 +264,7 @@ Servers normally activate the client's [preferred](README.md#priority-and-activa
 
 Role removal includes explicit removal from `active_roles`, implicit removal when the connection is no longer playback-capable, and replacement of an active role version.
 
-Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
+Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. Before a `server/activate` drops `'playback'` from `activities`, the server MUST send `stream/end` for the `player` and `visualizer` streams if they are active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role or drop `'playback'`, the server MUST send any required `stream/end` before starting the re-handshake.
 
 When applying a `server/activate`, the client MUST:
 
@@ -398,7 +398,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 [Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
-The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`.
+The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
 
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
