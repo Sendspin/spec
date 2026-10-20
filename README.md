@@ -1323,6 +1323,8 @@ During an active stream, unavailable clients SHOULD discard otherwise valid audi
 - Bytes 9-12: send_ahead (big-endian uint32) - microseconds from the server's transmission of this message to `timestamp`
 - Rest of bytes: encoded audio frame
 
+An audio message shorter than 13 bytes is a protocol error: the client MUST close the connection.
+
 The timestamp indicates when the first audio sample in this chunk should be output. Clients MUST translate this server timestamp to their local clock using the [time filter](#clock-synchronization), subtracting their [`output_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients SHOULD compensate for any known processing delays (e.g., DAC latency, audio buffer delays) by accounting for these delays when submitting audio to the hardware.
 
 `send_ahead` reports the lead the server had in hand when it sent the chunk: its transmit time is `timestamp - send_ahead` in the server's clock, taken as described in [Transmit timestamps](#transmit-timestamps). The field saturates rather than wrapping: a server MUST send `0` when it transmits at or after `timestamp`, and `4294967295` when the true lead exceeds what the field can represent (about 71 minutes). Both saturation values report that no lead was measured, not a lead of that length, so a player MUST NOT use a chunk carrying either as a delay sample.
@@ -1508,6 +1510,8 @@ Clients MUST send `client-stream/start` before the first audio chunk. Sending `c
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
 - Rest of bytes: encoded audio frame
+
+A source audio message shorter than 9 bytes is a protocol error: the server MUST close the connection.
 
 The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). It is the best-effort time the audio reached the input (ADC). For codecs with encoder delay, it refers to the capture time of the first sample the decoder will emit for the chunk. The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
 
@@ -1807,6 +1811,8 @@ Each visualization `type` has its own binary message type. Every message carries
 - Byte 0: message type (uint8, one of the types listed below)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients MUST translate this server timestamp to their local clock using the [time filter](#clock-synchronization)
 - Remaining bytes: data, layout per type below; all `uint16` fields are big-endian
+
+A visualization message shorter than 9 bytes is a protocol error: the client MUST close the connection.
 
 Data whose timestamp is already in the past on arrival is dropped; stale visualization frames are never rendered.
 
