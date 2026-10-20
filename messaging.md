@@ -476,6 +476,8 @@ Upon receiving this message, the server SHOULD initiate the disconnect.
 
 An auto-reconnect is any new connection made without an operator action, including one prompted by an mDNS response for the client, whether it reports a new service or updates a known one.
 
+While the client's mDNS service is removed, servers SHOULD stop retrying an auto-reconnect and wait for an mDNS response to report the client again.
+
 On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
 
 Connections may be lost without this message (e.g., crash, network loss). Clients MAY deliberately close without sending `client/goodbye` unless this specification requires it. After sending `client/goodbye`, clients MAY close immediately without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`:
