@@ -386,7 +386,7 @@ Receivers that discard a binary role payload MUST still process Noise messages, 
 
 ### Binary Message ID Structure
 
-The first byte of every decrypted binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
+The first byte of every decrypted binary message is its message ID. A binary message whose AEAD plaintext is empty is a protocol error: the receiver MUST close the connection. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
 | IDs | Assignment |
 |---|---|
