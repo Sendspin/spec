@@ -423,7 +423,7 @@ The concatenated `data` from all fragments yields the original message's payload
 - Senders SHOULD NOT fragment messages that fit in a single Noise transport message.
 - A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it. A receiver MAY close the connection when the concatenated `data` received so far exceeds a limit it chooses. The limit SHOULD be large enough that no valid message it can receive exceeds it.
 
 The [ignore rules](#communication) also apply to fragmented messages. If the receiver does not implement `orig_type`, it MAY discard each fragment's `data` instead of allocating a reassembly buffer. It MUST still authenticate every Noise transport message, track the fragment sequence, and enforce the malformed-sequence rules below. The last fragment clears the sequence state. The discarded message is not dispatched.
 
