@@ -784,13 +784,15 @@ Upon receiving this message, the server SHOULD initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
-  - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server SHOULD NOT auto-reconnect
+  - `shutdown` - client is shutting down. When the device is powering off or otherwise going offline and no more specific reason applies, clients SHOULD send this reason. Server SHOULD auto-reconnect
   - `restart` - client is restarting and will reconnect. Server SHOULD auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server SHOULD NOT auto-reconnect
   - `unauthorized` - the server declared an activity set or `active_roles` the client is not authorized for (see [`server/activate`](#server--client-serveractivate)). Server SHOULD NOT auto-reconnect with the same activity set
   - `pairing_required` - the client refused, or no longer admits, an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server SHOULD NOT auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection under the [multiple-server admission rules](#multiple-servers-server-initiated). Server MAY retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server SHOULD NOT auto-reconnect
+
+An auto-reconnect is any new connection made without an operator action, including one prompted by an mDNS response for the client, whether it reports a new service or updates a known one.
 
 On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
 
