@@ -1462,7 +1462,7 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
 
-The server MUST NOT send `start` unless the source role is active, it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
+The server MUST NOT send `start` unless the source role is active, `'playback'` is in the connection's [`activities`](#server--client-serveractivate), it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
 A client MUST ignore `start` received while it is unavailable. Becoming available again does not resume streaming without a new `start`.
 
@@ -1476,7 +1476,7 @@ Streaming state is per-connection: a previously sent `start` does not survive re
 
 A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
-When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
+When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles` or dropping `'playback'` from `activities`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
 
 A source that becomes unavailable MUST clear any pending start authorization. If its input stream is open, it MUST stop sending source audio chunks and send `client-stream/end` before reporting [`available: false`](#external-source-handling) in `client/state`. The server treats the transition as an implicit `stop`.
 
@@ -1511,7 +1511,7 @@ The client ends the current input stream. After sending this message, the client
 
 Receiving a source audio message without an open input stream, or while the latest [`client/state`](#client--server-clientstate) received by the server reports `available: false`, is a protocol error: the server MUST close the connection. The client's stream lifecycle messages, audio chunks, and availability updates are delivered in send order on the same connection, so network delay cannot move earlier chunks past `client-stream/end` or an availability update.
 
-Clients MUST send `client-stream/start` before the first audio chunk. Sending `command: "stop"` or removing the source role does not itself close an input stream at the server. After either action, the server MUST tolerate otherwise valid in-flight responses to a previously sent `start`, including `client-stream/start` and audio chunks, until it receives `client-stream/end`. It MAY discard audio payloads but MUST process `client-stream/start` and `client-stream/end` in received order.
+Clients MUST send `client-stream/start` before the first audio chunk. Sending `command: "stop"`, removing the source role, or dropping `'playback'` does not itself close an input stream at the server. After any of these, the server MUST tolerate otherwise valid in-flight responses to a previously sent `start`, including `client-stream/start` and audio chunks, until it receives `client-stream/end`. It MAY discard audio payloads but MUST process `client-stream/start` and `client-stream/end` in received order.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
