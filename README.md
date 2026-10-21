@@ -718,6 +718,8 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
 
+On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start` and discard player audio and visualization data.
+
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
 Clients may change their stream-configuration fields to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
@@ -1458,7 +1460,7 @@ A `start` received while a start authorization is pending or the input stream is
 
 The server MUST NOT send `start` unless the source role is active, `'playback'` is in the connection's [`activities`](#server--client-serveractivate), it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
-A client MUST ignore `start` received while it is unavailable. Becoming available again does not resume streaming without a new `start`.
+A client MUST ignore `start` received while it is unavailable or while `'playback'` is not in the connection's `activities`. Becoming available again does not resume streaming without a new `start`.
 
 #### Default streaming behavior
 
