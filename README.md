@@ -119,6 +119,7 @@ sequenceDiagram
 - **Pairing Code** - a value used in code-based [pairing](#pairing) methods. The static-pairing-code method uses a fixed 8-digit decimal value; the dynamic-pairing-code method uses a per-session generated value, emitted as a 6-digit decimal code or as a QR code (see [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)).
 - **Factory Reset** - returns a device to its manufactured state: credentials and settings the manufacturer provisioned (identity keypair, pairing PSK, static pairing code, a calibrated [output delay](#client--server-clientstate-player-object)) are restored; everything accumulated since, pairing records included, is cleared.
 - **Paired Session** - a session keyed by a long-term PSK, meaning the client holds a pairing record for the server. Sessions keyed by the pairing PSK or the Sentinel PSK are *unpaired*, which limits the server to a pairing exchange, or to normal playback and control flows where [unpaired access](#unpaired-access) is enabled. Neither side sends this on the wire: both derive it from the PSK that matched during the [Noise](#encryption) handshake.
+- **Plain text** - a string meant to be read by a person. A receiver MUST NOT interpret it as links or markup, or pass it on as links or markup.
 
 ## Role Versioning
 
@@ -176,7 +177,7 @@ Clients announce their presence via mDNS using:
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
-The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative. The TXT `name` is [plain text](#definitions).
 
 Clients MUST NOT manually connect to servers while advertising `_sendspin._tcp`.
 
@@ -211,7 +212,7 @@ If clients prefer to initiate the connection instead of waiting for the server t
 
 Clients SHOULD discover the server through mDNS. A client that discovers the server initiates a WebSocket connection using the advertised address and path.
 
-The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative. The TXT `name` is [plain text](#definitions).
 
 Clients MUST NOT advertise `_sendspin._tcp` while using client-initiated connections.
 
@@ -509,7 +510,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
-- `name`: string - friendly name of the server
+- `name`: string - friendly name of the server, [plain text](#definitions)
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 - `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](#server--client-serverhello-sourcev1-support-object))
 
@@ -519,8 +520,8 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client
-- `device_info?`: object - optional information about the device
+- `name`: string - friendly name of the client, [plain text](#definitions)
+- `device_info?`: object - optional information about the device. Each string is [plain text](#definitions)
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
@@ -763,7 +764,7 @@ Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
 - `group_id`: string - group identifier
-- `group_name`: string - friendly name of the group
+- `group_name`: string - friendly name of the group, [plain text](#definitions)
 
 ### Server → Client: `server/unpair`
 
@@ -1133,7 +1134,7 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or the [round limit](#rounds) holds it back. Sent immediately on receiving such a pairing [`server/activate`](#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state and any `message` to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
 
 - `pairing_index`: integer - see [Pairing index](#messages)
-- `message?`: string - a short plain-text sentence for the operator, at most 200 characters, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it as text attributed to the device, truncates it to that length, and MUST NOT interpret markup or links in it
+- `message?`: string - a short [plain text](#definitions) sentence for the operator, at most 200 characters, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device and truncates it to that length
 
 #### Client → Server: `client/pair-init`
 
@@ -1620,6 +1621,8 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
     - `track_progress`: integer - playback position in milliseconds since start of track, measured at `timestamp`
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
+
+`title`, `artist`, `album_artist` and `album` are [plain text](#definitions).
 
 #### Scheduled metadata updates
 

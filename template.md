@@ -120,6 +120,7 @@ sequenceDiagram
 - **Pairing Code** - a value used in code-based [pairing](pairing.md#pairing) methods. The static-pairing-code method uses a fixed 8-digit decimal value; the dynamic-pairing-code method uses a per-session generated value, emitted as a 6-digit decimal code or as a QR code (see [Dynamic Pairing Code Flow](pairing.md#dynamic-pairing-code-flow)).
 - **Factory Reset** - returns a device to its manufactured state: credentials and settings the manufacturer provisioned (identity keypair, pairing PSK, static pairing code, a calibrated [output delay](roles/player/v1.md#client--server-clientstate-player-object)) are restored; everything accumulated since, pairing records included, is cleared.
 - **Paired Session** - a session keyed by a long-term PSK, meaning the client holds a pairing record for the server. Sessions keyed by the pairing PSK or the Sentinel PSK are *unpaired*, which limits the server to a pairing exchange, or to normal playback and control flows where [unpaired access](pairing.md#unpaired-access) is enabled. Neither side sends this on the wire: both derive it from the PSK that matched during the [Noise](connection.md#encryption) handshake.
+- **Plain text** - a string meant to be read by a person. A receiver MUST NOT interpret it as links or markup, or pass it on as links or markup.
 
 ## Role Versioning
 
