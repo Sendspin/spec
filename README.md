@@ -988,6 +988,8 @@ After 20 rounds since its last verified `server_kc` - the **round limit** - the 
 
 The limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending), optionally saying in `message` what it waits for.
 
+The server MUST NOT send [`server/pair-auth`](#server--client-serverpair-auth) in a round until the operator has entered the pairing code in that round. After 20 rounds in an attempt the server MUST NOT begin another, and answers [`client/pair-retry`](#client--server-clientpair-retry) with [`pair/abort`](#client--server-pairabort) reason `pairing_code_mismatch`.
+
 ### Static Pairing Code Flow
 
 Pairing with a fixed pairing code. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides. Every attempt is gesture-gated by a [pairing window](#pairing-window).
