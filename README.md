@@ -519,8 +519,8 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client
-- `device_info?`: object - optional information about the device
+- `name`: string - friendly name of the client. MUST be at most 64 bytes in UTF-8
+- `device_info?`: object - optional information about the device. Each string MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
