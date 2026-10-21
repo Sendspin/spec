@@ -444,7 +444,7 @@ The server MUST promptly send this message after the first `server/activate` on 
 Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
-- `group_id`: string - group identifier
+- `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
 - `group_name`: string - friendly name of the group
 
 ### Server → Client: `server/unpair`
