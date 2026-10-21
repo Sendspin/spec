@@ -68,7 +68,7 @@ Receivers that discard a binary role payload MUST still process Noise messages, 
 
 ### Binary Message ID Structure
 
-The first byte of every decrypted binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
+The first byte of every decrypted binary message is its message ID. A binary message whose AEAD plaintext is empty is a protocol error: the receiver MUST close the connection. So is a message with ID `0` whose body is not a valid UTF-8 JSON object with a `type` string and a `payload` object. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
 | IDs | Assignment |
 |---|---|
@@ -105,7 +105,7 @@ The concatenated `data` from all fragments yields the original message's payload
 - Senders SHOULD NOT fragment messages that fit in a single Noise transport message.
 - A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it. A receiver MAY close the connection when the concatenated `data` received so far exceeds a limit it chooses. The limit SHOULD be large enough that no valid message it can receive exceeds it.
 
 The [ignore rules](#communication) also apply to fragmented messages. If the receiver does not implement `orig_type`, it MAY discard each fragment's `data` instead of allocating a reassembly buffer. It MUST still authenticate every Noise transport message, track the fragment sequence, and enforce the malformed-sequence rules below. The last fragment clears the sequence state. The discarded message is not dispatched.
 
@@ -138,7 +138,7 @@ Every client and server MUST implement all messages in this section regardless o
 
 [Pairing](pairing.md#pairing) messages are REQUIRED for all servers; clients implement the subset matching their advertised pairing methods.
 
-WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order.
+WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order. The server MUST send `server/command`, `server/state`, and `group/update` messages, together with any earlier `server/activate` it has not yet sent, ahead of any binary role data it has not started transmitting.
 
 ### Client → Server: `client/init`
 
@@ -201,8 +201,8 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client, [plain text](README.md#definitions)
-- `device_info?`: object - optional information about the device. Each string is [plain text](README.md#definitions)
+- `name`: string - friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
+- `device_info?`: object - optional information about the device. Each string is [plain text](README.md#definitions) and MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
@@ -274,6 +274,8 @@ When applying a `server/activate`, the client MUST:
 State for roles that remain active at the same version is unchanged.
 
 Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
+
+Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
 ### Client → Server: `client/time`
 
@@ -444,7 +446,7 @@ The server MUST promptly send this message after the first `server/activate` on 
 Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
-- `group_id`: string - group identifier
+- `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
 - `group_name`: string - friendly name of the group, [plain text](README.md#definitions)
 
 ### Server → Client: `server/unpair`
@@ -466,13 +468,17 @@ Upon receiving this message, the server SHOULD initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
-  - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server SHOULD NOT auto-reconnect
+  - `shutdown` - client is shutting down. When the device is powering off or otherwise going offline and no more specific reason applies, clients SHOULD send this reason. Server SHOULD auto-reconnect
   - `restart` - client is restarting and will reconnect. Server SHOULD auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server SHOULD NOT auto-reconnect
   - `unauthorized` - the server declared an activity set or `active_roles` the client is not authorized for (see [`server/activate`](#server--client-serveractivate)). Server SHOULD NOT auto-reconnect with the same activity set
   - `pairing_required` - the client refused, or no longer admits, an [unpaired access](pairing.md#unpaired-access) connection because it does not have unpaired access enabled. Server SHOULD NOT auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection under the [multiple-server admission rules](connection.md#multiple-servers-server-initiated). Server MAY retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server SHOULD NOT auto-reconnect
+
+An auto-reconnect is any new connection made without an operator action, including one prompted by an mDNS response for the client, whether it reports a new service or updates a known one.
+
+While the client's mDNS service is removed, servers SHOULD stop retrying an auto-reconnect and wait for an mDNS response to report the client again.
 
 On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
 
