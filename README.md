@@ -1719,6 +1719,8 @@ The fields are:
 
 The concatenated `data` of all parts is the encoded image; the transfer is complete when the received data reaches `total_size`. An announce with `total_size` `0` completes immediately, with no parts. An artwork message MUST NOT exceed 65519 bytes, so that it fits in a single Noise transport message without [fragmentation](#fragmentation).
 
+A client MAY discard an image whose `total_size` exceeds a limit it chooses. The limit SHOULD be large enough that no valid image it can receive exceeds it.
+
 At most one image transfer is in flight at a time across all of the role's channels: a transfer is in flight from its announce until it completes or its partly received image is discarded. The server MUST NOT announce an image, on any channel, while a transfer is in flight; to replace an image still in flight, it cancels that transfer first. The server MUST cancel an in-flight transfer before sending an artwork [`stream/end`](#server--client-streamend) or a [`stream/start`](#server--client-streamstart) that changes that transfer's channel configuration. Any other messages MAY be sent between the messages of a transfer.
 
 A server SHOULD pace a transfer's parts instead of sending them back to back. Artwork is not time critical, so spreading the parts out keeps a large image from delaying the other roles the connection carries, such as `player@v1` audio chunks.
