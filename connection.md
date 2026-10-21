@@ -14,7 +14,9 @@ Clients announce their presence via mDNS using:
 - TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
 - TXT record: `name` key specifying the friendly name of the client (OPTIONAL)
 
-The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
+The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path. The server MUST NOT include an `Origin` header in that upgrade request.
+
+The client MUST reject a WebSocket upgrade request to its advertised path that carries an `Origin` header.
 
 The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
 
