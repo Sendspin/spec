@@ -1228,7 +1228,7 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
   - `buffer_capacity`: integer - maximum total size in bytes of outstanding audio chunks, as defined in [Player Buffer Accounting](#player-buffer-accounting)
 
-Servers MUST support the `flac` and `pcm` codecs at every combination of a `bit_depth` of 16 or 24, 1 or 2 `channels`, and a `sample_rate` of 44100 or 48000, and MAY support other formats, including `opus`. Players are not told which codecs a server supports; the server selects only among the formats it can produce, as described below.
+Servers MUST support `flac` at every combination of a `bit_depth` of 16 or 24, 1 or 2 `channels`, and a `sample_rate` of 44100 or 48000, MUST support `pcm` at the same combinations with a `bit_depth` of 16, and MAY support other formats, including `opus`. Players are not told which codecs a server supports; the server selects only among the formats it can produce, as described below.
 
 **Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
 
