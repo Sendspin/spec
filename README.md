@@ -195,7 +195,7 @@ When a new server connects, the client lets the handshake complete before applyi
 
 - A [pairing attempt](#entering-and-leaving-pairing) is not displaced by an incoming `'playback'` or `'pairing'` connection.
 - When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
-- A client MAY admit one incoming `'pairing'` connection alongside the admitted `'playback'` connection, holding both. A client that does not admit both connections rejects the incoming with [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` and closes the connection. While both are held, further incoming connections are arbitrated against the `'playback'` holder. When a later `server/activate` drops `'pairing'` from that connection's `activities`, the client arbitrates it against the `'playback'` holder as if it were incoming.
+- A client MAY admit one incoming `'pairing'` connection alongside an admitted connection whose `activities` are exactly `['playback']`, holding both. A client that does not admit both connections rejects the incoming with [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` and closes the connection. While both are held, this exception does not apply again: further incoming connections are arbitrated against the `'playback'` holder, and those that declare `'pairing'` also against the held pairing connection, admitted only if accepted against both. When a later `server/activate` drops `'pairing'` from that connection's `activities` or adds `'playback'` to them, the client arbitrates it against the `'playback'` holder as if it were incoming. When a later `server/activate` drops `'playback'` from the `'playback'` holder's `activities` or adds `'pairing'` to them, the client arbitrates it against the held pairing connection as if it were incoming.
 
 Subsequent `server/activate` updates do not otherwise trigger arbitration, even when a connection escalates its activities. A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
 
@@ -648,13 +648,13 @@ When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if
 
 **Worked example (`pairing_required`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`.
 
-Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
+Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation. A server SHOULD declare `'playback'` while the client's group is playing or while it wants the client's `source` to stream, whatever roles are active, and drop it once neither is the case, not at a track change or while the client moves to another playing group.
 
 Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
 Role removal includes explicit removal from `active_roles`, implicit removal when the connection is no longer playback-capable, and replacement of an active role version.
 
-Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
+Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. Before a `server/activate` drops `'playback'` from `activities`, the server MUST send `stream/end` for the `player` and `visualizer` streams if they are active. If the first activation after a [re-handshake](#re-handshake) will remove such a role or drop `'playback'`, the server MUST send any required `stream/end` before starting the re-handshake.
 
 When applying a `server/activate`, the client MUST:
 
@@ -790,7 +790,9 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 [Application-specific roles](#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
-The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`.
+The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
+
+On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start` and discard player audio and visualization data.
 
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
@@ -1371,6 +1373,8 @@ Request the player to perform an action, e.g., change volume or mute state.
 
 The server MUST NOT send a player command to a client before that client has sent its initial [`client/state`](#client--server-clientstate).
 
+While another admitted connection has `'playback'` in its [`activities`](#server--client-serveractivate), the client MUST ignore player commands from a connection without `'playback'`.
+
 ### Server → Client: `stream/start` player object
 
 The `player` object in [`stream/start`](#server--client-streamstart) has this structure:
@@ -1536,9 +1540,9 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
 
-The server MUST NOT send `start` unless the source role is active, it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
+The server MUST NOT send `start` unless the source role is active, `'playback'` is in the connection's [`activities`](#server--client-serveractivate), it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
-A client MUST ignore `start` received while it is unavailable. Becoming available again does not resume streaming without a new `start`.
+A client MUST ignore `start` received while it is unavailable or while `'playback'` is not in the connection's `activities`. Becoming available again does not resume streaming without a new `start`.
 
 #### Default streaming behavior
 
@@ -1550,7 +1554,7 @@ Streaming state is per-connection: a previously sent `start` does not survive re
 
 A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
-When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
+When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles` or dropping `'playback'` from `activities`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
 
 A source that becomes unavailable MUST clear any pending start authorization. If its input stream is open, it MUST stop sending source audio chunks and send `client-stream/end` before reporting [`available: false`](#external-source-handling) in `client/state`. The server treats the transition as an implicit `stop`.
 
@@ -1585,7 +1589,7 @@ The client ends the current input stream. After sending this message, the client
 
 Receiving a source audio message without an open input stream, or while the latest [`client/state`](#client--server-clientstate) received by the server reports `available: false`, is a protocol error: the server MUST close the connection. The client's stream lifecycle messages, audio chunks, and availability updates are delivered in send order on the same connection, so network delay cannot move earlier chunks past `client-stream/end` or an availability update.
 
-Clients MUST send `client-stream/start` before the first audio chunk. Sending `command: "stop"` or removing the source role does not itself close an input stream at the server. After either action, the server MUST tolerate otherwise valid in-flight responses to a previously sent `start`, including `client-stream/start` and audio chunks, until it receives `client-stream/end`. It MAY discard audio payloads but MUST process `client-stream/start` and `client-stream/end` in received order.
+Clients MUST send `client-stream/start` before the first audio chunk. Sending `command: "stop"`, removing the source role, or dropping `'playback'` does not itself close an input stream at the server. After any of these, the server MUST tolerate otherwise valid in-flight responses to a previously sent `start`, including `client-stream/start` and audio chunks, until it receives `client-stream/end`. It MAY discard audio payloads but MUST process `client-stream/start` and `client-stream/end` in received order.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
