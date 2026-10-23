@@ -330,13 +330,13 @@ When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if
 
 **Worked example (`pairing_required`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`.
 
-Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
+Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation. A server SHOULD declare `'playback'` while the client's group is playing or while it wants the client's `source` to stream, whatever roles are active, and drop it once neither is the case, not at a track change or while the client moves to another playing group.
 
 Servers normally activate the client's [preferred](README.md#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
 Role removal includes explicit removal from `active_roles`, implicit removal when the connection is no longer playback-capable, and replacement of an active role version.
 
-Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
+Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. Before a `server/activate` drops `'playback'` from `activities`, the server MUST send `stream/end` for the `player` and `visualizer` streams if they are active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role or drop `'playback'`, the server MUST send any required `stream/end` before starting the re-handshake.
 
 When applying a `server/activate`, the client MUST:
 
@@ -472,7 +472,9 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 [Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
-The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`.
+The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
+
+On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start` and discard player audio and visualization data.
 
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
