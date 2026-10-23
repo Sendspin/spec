@@ -263,7 +263,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
-- `name`: string - friendly name of the server
+- `name`: string - friendly name of the server, [plain text](README.md#definitions)
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 - `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](roles/source/v1.md#server--client-serverhello-sourcev1-support-object))
 
@@ -273,8 +273,8 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client. MUST be at most 64 bytes in UTF-8
-- `device_info?`: object - optional information about the device. Each string MUST be at most 64 bytes in UTF-8
+- `name`: string - friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
+- `device_info?`: object - optional information about the device. Each string is [plain text](README.md#definitions) and MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
@@ -519,7 +519,7 @@ Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
 - `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
-- `group_name`: string - friendly name of the group
+- `group_name`: string - friendly name of the group, [plain text](README.md#definitions)
 
 ### Server → Client: `server/unpair`
 

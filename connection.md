@@ -16,7 +16,7 @@ Clients announce their presence via mDNS using:
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path. The server SHOULD only connect to an advertised address that is not a loopback or unspecified address, and only when the advertised `path` matches the `path-absolute` rule of [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-3.3).
 
-The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative. The TXT `name` is [plain text](README.md#definitions).
 
 Clients MUST NOT manually connect to servers while advertising `_sendspin._tcp`.
 
@@ -51,7 +51,7 @@ If clients prefer to initiate the connection instead of waiting for the server t
 
 Clients SHOULD discover the server through mDNS. A client that discovers the server initiates a WebSocket connection using the advertised address and path. The client SHOULD only connect to an advertised address that is not a loopback or unspecified address, and only when the advertised `path` matches the `path-absolute` rule of [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-3.3).
 
-The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](messaging.md#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](messaging.md#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative. The TXT `name` is [plain text](README.md#definitions).
 
 Clients MUST NOT advertise `_sendspin._tcp` while using client-initiated connections.
 
