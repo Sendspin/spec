@@ -16,7 +16,7 @@ Clients announce their presence via mDNS using:
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path. The server SHOULD only connect to an advertised address that is not a loopback or unspecified address, and only when the advertised `path` matches the `path-absolute` rule of [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-3.3). The server MUST NOT include an `Origin` header in the upgrade request.
 
-The client MUST reject a WebSocket upgrade request to its advertised path that carries an `Origin` header.
+The client MUST reject a WebSocket upgrade request to its Sendspin endpoint that carries an `Origin` header.
 
 The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
 
