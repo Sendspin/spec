@@ -1502,12 +1502,6 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
   - `features?`: object - optional feature hints
     - `line_sense?`: boolean - true if source reports `signal`
 
-Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that supports the `source@v1` role MUST list the codecs it accepts in the [`source@v1_support`](#server--client-serverhello-sourcev1-support-object) object of `server/hello`. A source MUST announce only a listed codec in `client-stream/start` and MUST be able to produce `flac` or `pcm`, so that every server can accept its input.
-
-**Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
-
-A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
-
 ### Server → Client: `server/hello` source@v1 support object
 
 The `source@v1_support` object in [`server/hello`](#server--client-serverhello) has this structure:
@@ -1516,6 +1510,12 @@ The `source@v1_support` object in [`server/hello`](#server--client-serverhello) 
   - `supported_codecs`: string[] - non-empty list of codecs the server accepts in `client-stream/start`, each 'opus', 'flac', or 'pcm'; MUST include 'flac' and 'pcm'
 
 A source MUST ignore codec identifiers it does not recognize.
+
+Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that supports the `source@v1` role MUST list the codecs it accepts in the [`source@v1_support`](#server--client-serverhello-sourcev1-support-object) object of `server/hello`. A source MUST announce only a listed codec in `client-stream/start` and MUST be able to produce `flac` or `pcm`, so that every server can accept its input.
+
+**Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
+
+A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
 
 ### Client → Server: `client/state` source object
 
