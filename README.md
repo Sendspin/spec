@@ -609,7 +609,6 @@ Clients that can output audio SHOULD have the role `player`.
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - required if `player@v1` is listed, absent otherwise ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
-- `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 - `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method (see [Pairing](#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
@@ -1484,7 +1483,7 @@ The player renders decoded frames at their server timestamps translated to local
 **Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. Keep these one-shot corrections rare, as required by [Correction Quality](#correction-quality).
 
 ## Source messages
-This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (line sensing), and stream timestamped audio frames.
+This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, report whether they have input audio to offer, and stream timestamped audio frames.
 
 A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin). Such a device MUST NOT play its captured input locally. Like every player, it outputs only the stream the server distributes, so its output stays in sync with the rest of the group.
 
@@ -1493,14 +1492,6 @@ A device MAY implement both the `source` and `player` roles (e.g., a speaker wit
 A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. It timestamps each binary source audio message in the server time domain by inverting the filter's server-to-local mapping (`t_local = compute_client_time(t_server)`): for a capture at local time `t_capture` it sends the `t_server` that maps to it. The mapping is linear in the filter's offset and drift, so this inverse is well-defined; apply both offset and drift, not offset alone.
 
 **Unpaired access:** As `source@v1` exposes the server's audio stack to arbitrary input, activating it for an unauthenticated device requires explicit [approval](#unpaired-access). Approval implied by other use of the device, such as starting playback on it, does not extend to `source@v1`: the server leaves the role out of [`active_roles`](#server--client-serveractivate) until explicit approval. Clients with a privacy-sensitive input such as a microphone SHOULD ship with unpaired access disabled: the captured audio would otherwise be accessible to anyone on the network.
-
-### Client → Server: `client/hello` source@v1 support object
-
-The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
-
-- `source@v1_support`: object
-  - `features?`: object - optional feature hints
-    - `line_sense?`: boolean - true if source reports `signal`
 
 ### Server → Client: `server/hello` source@v1 support object
 
@@ -1522,7 +1513,7 @@ A source announces its input format in [`client-stream/start`](#client--server-c
 The `source` object in [`client/state`](#client--server-clientstate) has this structure:
 
 - `source`: object
-  - `signal?`: 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
+  - `signal`: 'present' | 'absent' - whether the source currently has input audio to offer
 
 ### Server → Client: `server/command` source object
 
@@ -1551,7 +1542,7 @@ Servers MUST NOT treat an otherwise valid `client-stream/start` as unsolicited s
 
 Streaming state is per-connection: a previously sent `start` does not survive reconnection, and a server that still wants the stream MUST send `command: "start"` again.
 
-A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
+A source reports `signal` in [`client/state`](#client--server-clientstate). It sets it from user actions, such as a button or a sharing toggle, from detecting audio on its input, or from both. A source fed by another device through an audio-only connection, such as an analog line-in, SHOULD detect from the input audio whether that device is playing. The server MAY use a change to `present` as a hint to send `command: "start"` and a change to `absent` as a hint to send `command: "stop"`, but the decision is server policy. The first `signal` the server receives after the source role is activated, or after the client reports `available: true` again, counts as a change.
 
 When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
 
