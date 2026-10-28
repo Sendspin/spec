@@ -68,7 +68,7 @@ Receivers that discard a binary role payload MUST still process Noise messages, 
 
 ### Binary Message ID Structure
 
-The first byte of every decrypted binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
+The first byte of every decrypted binary message is its message ID. A binary message whose AEAD plaintext is empty is a protocol error: the receiver MUST close the connection. So is a message with ID `0` whose body is not a valid UTF-8 JSON object with a `type` string and a `payload` object. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
 | IDs | Assignment |
 |---|---|
@@ -105,7 +105,7 @@ The concatenated `data` from all fragments yields the original message's payload
 - Senders SHOULD NOT fragment messages that fit in a single Noise transport message.
 - A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it. A receiver MAY close the connection when the concatenated `data` received so far exceeds a limit it chooses. The limit SHOULD be large enough that no valid message it can receive exceeds it.
 
 The [ignore rules](#communication) also apply to fragmented messages. If the receiver does not implement `orig_type`, it MAY discard each fragment's `data` instead of allocating a reassembly buffer. It MUST still authenticate every Noise transport message, track the fragment sequence, and enforce the malformed-sequence rules below. The last fragment clears the sequence state. The discarded message is not dispatched.
 
@@ -113,13 +113,85 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules.
 
-Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
-Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
+Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
 
 A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
+
+### Time filter
+
+The time filter estimates `offset`, the server clock minus the client clock, and `drift`, the rate at which `offset` changes. All times are in microseconds, and the filter keeps its state in double-precision floating point.
+
+Each `server/time` response gives one measurement. With `T1` as `client_transmitted`, `T2` as `server_received`, `T3` as `server_transmitted`, and `T4` as the client's receive time for the response (see [Receive timestamps](#receive-timestamps)):
+
+```
+measurement = ((T2 - T1) + (T3 - T4)) / 2
+max_error   = ((T4 - T1) - (T3 - T2)) / 2
+time_added  = T4
+```
+
+All four timestamps are integers, and `/ 2` is integer division truncating toward zero. `measurement` is the offset this exchange observed, and `max_error`, half the round-trip delay, is the worst-case error of that offset when the network delays in the two directions differ.
+
+#### Time filter parameters
+
+Clients SHOULD use these parameter values:
+
+| Parameter | Value | Purpose |
+|---|---|---|
+| `process_std_dev` | 0.0 | Offset random-walk diffusion, in µs per √µs |
+| `drift_process_std_dev` | 1e-11 | Drift random-walk diffusion, in 1 per √µs |
+| `forget_factor` | 2.0 | Value greater than 1 whose square scales the covariances on a large residual |
+| `adaptive_cutoff` | 3.0 | Multiple of `max_error` above which a residual is large |
+| `min_samples` | 100 | Value `count` must reach before adaptive forgetting applies |
+| `drift_significance_threshold` | 2.0 | Signal-to-noise ratio `drift` must exceed before conversions apply it |
+| `max_error_scale` | 0.5 | Scale from `max_error` to the measurement standard deviation |
+
+#### Time filter update
+
+The filter state is `offset`, `drift`, the offset variance `P_oo`, the offset-drift covariance `P_od`, the drift variance `P_dd`, `last_update`, `count`, and `use_drift`. A new filter starts with `P_oo` at infinity, `use_drift` false, and every other value at 0.
+
+For each measurement:
+
+1. If `time_added <= last_update` or `max_error <= 0`, discard the measurement. Otherwise set `dt = time_added - last_update` and `last_update = time_added`.
+2. Set the measurement variance `R = (max_error_scale * max_error)^2`.
+3. If `count` is 0, set `offset = measurement`, `P_oo = R`, `drift = 0`, and `count = 1`, and skip the remaining steps.
+4. If `count` is 1, set `drift = (measurement - offset) / dt` and `P_dd = (P_oo + R) / dt^2`, then `offset = measurement`, `P_oo = R`, and `count = 2`, and skip the remaining steps.
+5. Predict from the current state:
+   ```
+   offset_p = offset + drift * dt
+   P_oo_p   = P_oo + 2 * P_od * dt + P_dd * dt^2 + process_std_dev^2 * dt
+   P_od_p   = P_od + P_dd * dt
+   P_dd_p   = P_dd + drift_process_std_dev^2 * dt
+   ```
+6. Set the residual `y = measurement - offset_p`. If `count < min_samples`, increment `count`. Otherwise, if `|y| > adaptive_cutoff * max_error`, multiply `P_oo_p`, `P_od_p`, and `P_dd_p` by `forget_factor^2`.
+7. Correct the state:
+   ```
+   S      = P_oo_p + R
+   K_o    = P_oo_p / S
+   K_d    = P_od_p / S
+   offset = offset_p + K_o * y
+   drift  = drift + K_d * y
+   P_oo   = P_oo_p - K_o * P_oo_p
+   P_od   = P_od_p - K_d * P_oo_p
+   P_dd   = P_dd_p - K_d * P_od_p
+   ```
+8. Set `use_drift` to whether `drift^2 > drift_significance_threshold^2 * P_dd`.
+
+`sqrt(P_oo)` is the standard deviation of the offset estimate in microseconds.
+
+#### Time conversion
+
+With `d` as `drift` when `use_drift` is true and 0 otherwise:
+
+```
+compute_server_time(t_client) = t_client + round(offset + d * (t_client - last_update))
+compute_client_time(t_server) = round((t_server - offset + d * last_update) / (1 + d))
+```
+
+`round` rounds to the nearest integer, with halves rounded away from zero. Apart from rounding, `compute_client_time` is the inverse of `compute_server_time`.
 
 ### Transmit timestamps
 
@@ -138,7 +210,7 @@ Every client and server MUST implement all messages in this section regardless o
 
 [Pairing](pairing.md#pairing) messages are REQUIRED for all servers; clients implement the subset matching their advertised pairing methods.
 
-WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order.
+WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order. The server MUST send `server/command`, `server/state`, and `group/update` messages, together with any earlier `server/activate` it has not yet sent, ahead of any binary role data it has not started transmitting.
 
 ### Client → Server: `client/init`
 
@@ -191,7 +263,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
-- `name`: string - friendly name of the server
+- `name`: string - friendly name of the server, [plain text](README.md#definitions)
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 - `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](roles/source/v1.md#server--client-serverhello-sourcev1-support-object))
 
@@ -201,8 +273,8 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client
-- `device_info?`: object - optional information about the device
+- `name`: string - friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
+- `device_info?`: object - optional information about the device. Each string is [plain text](README.md#definitions) and MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
@@ -216,9 +288,8 @@ Clients that can output audio SHOULD have the role `player`.
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - required if `player@v1` is listed, absent otherwise ([see player@v1 support object details](roles/player/v1.md#client--server-clienthello-playerv1-support-object))
-- `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](roles/source/v1.md#client--server-clienthello-sourcev1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](roles/visualizer/v1.md#client--server-clienthello-visualizerv1-support-object))
-- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method, and at most one pairing-code method may be listed (see [Pairing](pairing.md#pairing)).
+- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method (see [Pairing](pairing.md#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](pairing.md#unpaired-access)
   - `enabled`: boolean
 
@@ -274,6 +345,8 @@ When applying a `server/activate`, the client MUST:
 State for roles that remain active at the same version is unchanged.
 
 Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
+
+Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
 ### Client → Server: `client/time`
 
@@ -358,7 +431,7 @@ Leaves the client's current group. No payload fields.
 
 A client sends this when it no longer wants to take part in its group's playback, for example while performing an [interruptible non-Sendspin activity](#interruptible-activity-client-stays-available).
 
-The server handles it as [when the client becomes unavailable](#server-behavior-when-a-client-becomes-unavailable-available-false): the client ends up in a solo group with playback stopped, and rejoins only via an explicit [`switch`](roles/controller/v1.md#switch-command-cycle).
+The server handles it as [when the client becomes unavailable](#server-behavior-when-a-client-becomes-unavailable-available-false): the client ends up in a solo group with playback stopped, and rejoins only via an explicit [`switch`](roles/controller/v1.md#switch-command-cycle). Unlike becoming unavailable, a leave ends no stream by itself. Each stream continues or ends as it would for any client in the new solo group.
 
 ### Server → Client: `server/state`
 
@@ -446,8 +519,8 @@ The server MUST promptly send this message after the first `server/activate` on 
 Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
-- `group_id`: string - group identifier
-- `group_name`: string - friendly name of the group
+- `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
+- `group_name`: string - friendly name of the group, [plain text](README.md#definitions)
 
 ### Server → Client: `server/unpair`
 
@@ -468,13 +541,17 @@ Upon receiving this message, the server SHOULD initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
-  - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server SHOULD NOT auto-reconnect
+  - `shutdown` - client is shutting down. When the device is powering off or otherwise going offline and no more specific reason applies, clients SHOULD send this reason. Server SHOULD auto-reconnect
   - `restart` - client is restarting and will reconnect. Server SHOULD auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server SHOULD NOT auto-reconnect
   - `unauthorized` - the server declared an activity set or `active_roles` the client is not authorized for (see [`server/activate`](#server--client-serveractivate)). Server SHOULD NOT auto-reconnect with the same activity set
   - `pairing_required` - the client refused, or no longer admits, an [unpaired access](pairing.md#unpaired-access) connection because it does not have unpaired access enabled. Server SHOULD NOT auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection under the [multiple-server admission rules](connection.md#multiple-servers-server-initiated). Server MAY retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server SHOULD NOT auto-reconnect
+
+An auto-reconnect is any new connection made without an operator action, including one prompted by an mDNS response for the client, whether it reports a new service or updates a known one.
+
+While the client's mDNS service is removed, servers SHOULD stop retrying an auto-reconnect and wait for an mDNS response to report the client again.
 
 On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
 

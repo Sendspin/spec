@@ -119,6 +119,7 @@ sequenceDiagram
 - **Pairing Code** - a value used in code-based [pairing](#pairing) methods. The static-pairing-code method uses a fixed 8-digit decimal value; the dynamic-pairing-code method uses a per-session generated value, emitted as a 6-digit decimal code or as a QR code (see [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)).
 - **Factory Reset** - returns a device to its manufactured state: credentials and settings the manufacturer provisioned (identity keypair, pairing PSK, static pairing code, a calibrated [output delay](#client--server-clientstate-player-object)) are restored; everything accumulated since, pairing records included, is cleared.
 - **Paired Session** - a session keyed by a long-term PSK, meaning the client holds a pairing record for the server. Sessions keyed by the pairing PSK or the Sentinel PSK are *unpaired*, which limits the server to a pairing exchange, or to normal playback and control flows where [unpaired access](#unpaired-access) is enabled. Neither side sends this on the wire: both derive it from the PSK that matched during the [Noise](#encryption) handshake.
+- **Plain text** - a string meant to be read by a person. A receiver MUST NOT interpret it as links or markup, and MUST escape it when embedding it in a format that would.
 
 ## Role Versioning
 
@@ -174,9 +175,11 @@ Clients announce their presence via mDNS using:
 - TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
 - TXT record: `name` key specifying the friendly name of the client (OPTIONAL)
 
-The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
+The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path. The server SHOULD only connect to an advertised address that is not a loopback or unspecified address, and only when the advertised `path` matches the `path-absolute` rule of [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-3.3). The server MUST NOT include an `Origin` header in the upgrade request.
 
-The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
+The client MUST reject a WebSocket upgrade request to its Sendspin endpoint that carries an `Origin` header.
+
+The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative. The TXT `name` is [plain text](#definitions).
 
 Clients MUST NOT manually connect to servers while advertising `_sendspin._tcp`.
 
@@ -215,9 +218,9 @@ If clients prefer to initiate the connection instead of waiting for the server t
 - TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
 - TXT record: `name` key specifying the friendly name of the server (OPTIONAL)
 
-Clients SHOULD discover the server through mDNS. A client that discovers the server initiates a WebSocket connection using the advertised address and path.
+Clients SHOULD discover the server through mDNS. A client that discovers the server initiates a WebSocket connection using the advertised address and path. The client SHOULD only connect to an advertised address that is not a loopback or unspecified address, and only when the advertised `path` matches the `path-absolute` rule of [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-3.3).
 
-The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative. The TXT `name` is [plain text](#definitions).
 
 Clients MUST NOT advertise `_sendspin._tcp` while using client-initiated connections.
 
@@ -392,7 +395,7 @@ Receivers that discard a binary role payload MUST still process Noise messages, 
 
 ### Binary Message ID Structure
 
-The first byte of every decrypted binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
+The first byte of every decrypted binary message is its message ID. A binary message whose AEAD plaintext is empty is a protocol error: the receiver MUST close the connection. So is a message with ID `0` whose body is not a valid UTF-8 JSON object with a `type` string and a `payload` object. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
 | IDs | Assignment |
 |---|---|
@@ -429,7 +432,7 @@ The concatenated `data` from all fragments yields the original message's payload
 - Senders SHOULD NOT fragment messages that fit in a single Noise transport message.
 - A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with its `data`; on any other fragment, append its `data` to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it. A receiver MAY close the connection when the concatenated `data` received so far exceeds a limit it chooses. The limit SHOULD be large enough that no valid message it can receive exceeds it.
 
 The [ignore rules](#communication) also apply to fragmented messages. If the receiver does not implement `orig_type`, it MAY discard each fragment's `data` instead of allocating a reassembly buffer. It MUST still authenticate every Noise transport message, track the fragment sequence, and enforce the malformed-sequence rules below. The last fragment clears the sequence state. The discarded message is not dispatched.
 
@@ -437,13 +440,85 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules.
 
-Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
-Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
+Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
 
 A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
+
+### Time filter
+
+The time filter estimates `offset`, the server clock minus the client clock, and `drift`, the rate at which `offset` changes. All times are in microseconds, and the filter keeps its state in double-precision floating point.
+
+Each `server/time` response gives one measurement. With `T1` as `client_transmitted`, `T2` as `server_received`, `T3` as `server_transmitted`, and `T4` as the client's receive time for the response (see [Receive timestamps](#receive-timestamps)):
+
+```
+measurement = ((T2 - T1) + (T3 - T4)) / 2
+max_error   = ((T4 - T1) - (T3 - T2)) / 2
+time_added  = T4
+```
+
+All four timestamps are integers, and `/ 2` is integer division truncating toward zero. `measurement` is the offset this exchange observed, and `max_error`, half the round-trip delay, is the worst-case error of that offset when the network delays in the two directions differ.
+
+#### Time filter parameters
+
+Clients SHOULD use these parameter values:
+
+| Parameter | Value | Purpose |
+|---|---|---|
+| `process_std_dev` | 0.0 | Offset random-walk diffusion, in µs per √µs |
+| `drift_process_std_dev` | 1e-11 | Drift random-walk diffusion, in 1 per √µs |
+| `forget_factor` | 2.0 | Value greater than 1 whose square scales the covariances on a large residual |
+| `adaptive_cutoff` | 3.0 | Multiple of `max_error` above which a residual is large |
+| `min_samples` | 100 | Value `count` must reach before adaptive forgetting applies |
+| `drift_significance_threshold` | 2.0 | Signal-to-noise ratio `drift` must exceed before conversions apply it |
+| `max_error_scale` | 0.5 | Scale from `max_error` to the measurement standard deviation |
+
+#### Time filter update
+
+The filter state is `offset`, `drift`, the offset variance `P_oo`, the offset-drift covariance `P_od`, the drift variance `P_dd`, `last_update`, `count`, and `use_drift`. A new filter starts with `P_oo` at infinity, `use_drift` false, and every other value at 0.
+
+For each measurement:
+
+1. If `time_added <= last_update` or `max_error <= 0`, discard the measurement. Otherwise set `dt = time_added - last_update` and `last_update = time_added`.
+2. Set the measurement variance `R = (max_error_scale * max_error)^2`.
+3. If `count` is 0, set `offset = measurement`, `P_oo = R`, `drift = 0`, and `count = 1`, and skip the remaining steps.
+4. If `count` is 1, set `drift = (measurement - offset) / dt` and `P_dd = (P_oo + R) / dt^2`, then `offset = measurement`, `P_oo = R`, and `count = 2`, and skip the remaining steps.
+5. Predict from the current state:
+   ```
+   offset_p = offset + drift * dt
+   P_oo_p   = P_oo + 2 * P_od * dt + P_dd * dt^2 + process_std_dev^2 * dt
+   P_od_p   = P_od + P_dd * dt
+   P_dd_p   = P_dd + drift_process_std_dev^2 * dt
+   ```
+6. Set the residual `y = measurement - offset_p`. If `count < min_samples`, increment `count`. Otherwise, if `|y| > adaptive_cutoff * max_error`, multiply `P_oo_p`, `P_od_p`, and `P_dd_p` by `forget_factor^2`.
+7. Correct the state:
+   ```
+   S      = P_oo_p + R
+   K_o    = P_oo_p / S
+   K_d    = P_od_p / S
+   offset = offset_p + K_o * y
+   drift  = drift + K_d * y
+   P_oo   = P_oo_p - K_o * P_oo_p
+   P_od   = P_od_p - K_d * P_oo_p
+   P_dd   = P_dd_p - K_d * P_od_p
+   ```
+8. Set `use_drift` to whether `drift^2 > drift_significance_threshold^2 * P_dd`.
+
+`sqrt(P_oo)` is the standard deviation of the offset estimate in microseconds.
+
+#### Time conversion
+
+With `d` as `drift` when `use_drift` is true and 0 otherwise:
+
+```
+compute_server_time(t_client) = t_client + round(offset + d * (t_client - last_update))
+compute_client_time(t_server) = round((t_server - offset + d * last_update) / (1 + d))
+```
+
+`round` rounds to the nearest integer, with halves rounded away from zero. Apart from rounding, `compute_client_time` is the inverse of `compute_server_time`.
 
 ### Transmit timestamps
 
@@ -462,7 +537,7 @@ Every client and server MUST implement all messages in this section regardless o
 
 [Pairing](#pairing) messages are REQUIRED for all servers; clients implement the subset matching their advertised pairing methods.
 
-WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order.
+WebSocket preserves message order within each direction, but messages in opposite directions can cross. Clients MUST process `stream/start`, `stream/clear`, and `stream/end` in delivery order, even when discarding role data. Servers MUST likewise process `client-stream/start` and `client-stream/end` in delivery order. The server MUST send `server/command`, `server/state`, and `group/update` messages, together with any earlier `server/activate` it has not yet sent, ahead of any binary role data it has not started transmitting.
 
 ### Client → Server: `client/init`
 
@@ -515,7 +590,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
-- `name`: string - friendly name of the server
+- `name`: string - friendly name of the server, [plain text](#definitions)
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 - `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](#server--client-serverhello-sourcev1-support-object))
 
@@ -525,8 +600,8 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client
-- `device_info?`: object - optional information about the device
+- `name`: string - friendly name of the client, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
+- `device_info?`: object - optional information about the device. Each string is [plain text](#definitions) and MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
@@ -540,9 +615,8 @@ Clients that can output audio SHOULD have the role `player`.
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - required if `player@v1` is listed, absent otherwise ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
-- `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
-- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method, and at most one pairing-code method may be listed (see [Pairing](#pairing)).
+- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method (see [Pairing](#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
   - `enabled`: boolean
 
@@ -598,6 +672,8 @@ When applying a `server/activate`, the client MUST:
 State for roles that remain active at the same version is unchanged.
 
 Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
+
+Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
 ### Client → Server: `client/time`
 
@@ -682,7 +758,7 @@ Leaves the client's current group. No payload fields.
 
 A client sends this when it no longer wants to take part in its group's playback, for example while performing an [interruptible non-Sendspin activity](#interruptible-activity-client-stays-available).
 
-The server handles it as [when the client becomes unavailable](#server-behavior-when-a-client-becomes-unavailable-available-false): the client ends up in a solo group with playback stopped, and rejoins only via an explicit [`switch`](#switch-command-cycle).
+The server handles it as [when the client becomes unavailable](#server-behavior-when-a-client-becomes-unavailable-available-false): the client ends up in a solo group with playback stopped, and rejoins only via an explicit [`switch`](#switch-command-cycle). Unlike becoming unavailable, a leave ends no stream by itself. Each stream continues or ends as it would for any client in the new solo group.
 
 ### Server → Client: `server/state`
 
@@ -770,8 +846,8 @@ The server MUST promptly send this message after the first `server/activate` on 
 Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
-- `group_id`: string - group identifier
-- `group_name`: string - friendly name of the group
+- `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
+- `group_name`: string - friendly name of the group, [plain text](#definitions)
 
 ### Server → Client: `server/unpair`
 
@@ -792,13 +868,17 @@ Upon receiving this message, the server SHOULD initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
-  - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server SHOULD NOT auto-reconnect
+  - `shutdown` - client is shutting down. When the device is powering off or otherwise going offline and no more specific reason applies, clients SHOULD send this reason. Server SHOULD auto-reconnect
   - `restart` - client is restarting and will reconnect. Server SHOULD auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server SHOULD NOT auto-reconnect
   - `unauthorized` - the server declared an activity set or `active_roles` the client is not authorized for (see [`server/activate`](#server--client-serveractivate)). Server SHOULD NOT auto-reconnect with the same activity set
   - `pairing_required` - the client refused, or no longer admits, an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server SHOULD NOT auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection under the [multiple-server admission rules](#multiple-servers-server-initiated). Server MAY retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server SHOULD NOT auto-reconnect
+
+An auto-reconnect is any new connection made without an operator action, including one prompted by an mDNS response for the client, whether it reports a new service or updates a known one.
+
+While the client's mDNS service is removed, servers SHOULD stop retrying an auto-reconnect and wait for an mDNS response to report the client again.
 
 On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
 
@@ -868,7 +948,7 @@ While a client is unapproved, the server SHOULD identify and present it to the o
 
 The Noise handshake completes using the pairing PSK, authenticating both sides. After the pairing `server/activate`, the client MUST send [`client/pair-init`](#client--server-clientpair-init) followed immediately by [`client/pair-finalize`](#client--server-clientpair-finalize), without waiting for a server response.
 
-**Lifecycle.** The client's pairing PSK MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices, whether provisioned at manufacture or generated by the client. It persists across reboots and is per-client and long-lived: a successful pairing does not consume it (pairing produces a separate [long-term PSK](#definitions)), so it can pair the client with any number of servers.
+**Lifecycle.** The client's pairing PSK MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices, whether provisioned at manufacture or generated by the client. It persists across reboots and is per-client and long-lived: a successful pairing does not consume it (pairing produces a separate [long-term PSK](#definitions)), so it can pair the client with any number of servers. The [pairing token](#pairing-token) is therefore a credential: anyone holding it can pair any server with the client at any time.
 
 ```mermaid
 sequenceDiagram
@@ -992,9 +1072,11 @@ A failed key confirmation results in [`pair/abort`](#client--server-pairabort) w
 
 An attempt runs **rounds** against the same pairing code. A round begins with [`server/pair-init`](#server--client-serverpair-init) and ends with the client's verification of `server_kc` from [`server/pair-confirm`](#server--client-serverpair-confirm), or with the attempt. Within it the client emits the code, the operator enters it, and a separate CPace run - fresh scalars, its own `sid` - follows. On a verified `server_kc` the client continues with [`client/pair-confirm`](#client--server-clientpair-confirm). On failure the client either sends [`client/pair-retry`](#client--server-clientpair-retry), asking for another round, or ends the attempt with [`pair/abort`](#client--server-pairabort) reason `pairing_code_mismatch`. The client SHOULD retry, and MUST abort instead at the round limit. A retry keeps the attempt, its pairing code, and its running [attempt timeout](#entering-and-leaving-pairing) in place; the server begins the next round with a new `server/pair-init`.
 
-After 20 rounds since its last verified `server_kc` - the **round limit** - the client MUST abort rather than retry and hold attempts back until a deliberate, manufacturer-defined operator action, which also resets the count. The count is not partitioned by `server_id` or source address. A client MAY hold attempts back earlier - by a cooldown or by an operator action, including from the first attempt - and MAY likewise abort rather than retry short of the limit.
+After 20 rounds since its last verified `server_kc` - the **round limit** - the client MUST abort rather than retry and hold attempts back until a deliberate, manufacturer-defined operator action. A client MAY hold attempts back earlier - by a cooldown or by an operator action, including from the first attempt - and MAY likewise abort rather than retry short of the limit. Only a verified `server_kc` and an operator action that releases held-back attempts reset the count: the end of a cooldown or an operator action during an attempt does not. The count is not partitioned by `server_id` or source address.
 
 The limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending), optionally saying in `message` what it waits for.
+
+The server MUST NOT send [`server/pair-auth`](#server--client-serverpair-auth) in a round until the operator has entered the pairing code in that round. After 20 rounds in an attempt the server MUST NOT begin another, and answers [`client/pair-retry`](#client--server-clientpair-retry) with [`pair/abort`](#client--server-pairabort) reason `pairing_code_mismatch`.
 
 ### Static Pairing Code Flow
 
@@ -1110,7 +1192,7 @@ with `label` `"sendspin-pair-psk-wrap-v1"` for `wrapped_psk` and `"sendspin-pair
 
 ### Protocol Errors
 
-A condition during pairing that no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, an entered code that fails the binding check, a `wrapped_nonce_B` or `wrapped_psk` that fails to decrypt - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
+A condition during pairing that no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, an entered code that fails the binding check, a `wrapped_nonce_B` or `wrapped_psk` that fails to decrypt, a delivered long-term PSK equal to the Sentinel PSK or to the pairing PSK the connection is keyed by - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
 
 ### Client → Server: `client/hello` pair-method descriptor
 
@@ -1141,7 +1223,7 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or the [round limit](#rounds) holds it back. Sent immediately on receiving such a pairing [`server/activate`](#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state and any `message` to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
 
 - `pairing_index`: integer - see [Pairing index](#messages)
-- `message?`: string - a short plain-text sentence for the operator, at most 200 characters, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it as text attributed to the device, truncates it to that length, and MUST NOT interpret markup or links in it
+- `message?`: string - a short [plain text](#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device and truncates it to that length
 
 #### Client → Server: `client/pair-init`
 
@@ -1236,7 +1318,7 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
   - `buffer_capacity`: integer - maximum total size in bytes of outstanding audio chunks, as defined in [Player Buffer Accounting](#player-buffer-accounting)
 
-Servers MUST support the `flac` and `pcm` codecs and MAY support `opus`. Players MUST list either `flac` or `pcm` and MAY list both as entries in `supported_formats`, so that every server can serve them, and MAY list `opus` in addition. Players are not told which codecs a server supports; the server selects only among the formats it can produce, as described below.
+Servers MUST support `flac` at every combination of a `bit_depth` of 16 or 24, 1 or 2 `channels`, and a `sample_rate` of 44100 or 48000, MUST support `pcm` at the same combinations with a `bit_depth` of 16, and MAY support other formats, including `opus`. Players are not told which codecs a server supports; the server selects only among the formats it can produce, as described below.
 
 **Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
 
@@ -1265,7 +1347,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
   - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands`
   - `output_delay_ms`: integer - output delay in milliseconds (0-5000)
   - `required_lead_time_ms`: non-negative integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server Audio Send Constraints](#server-audio-send-constraints)).
-  - `min_buffer_ms`: non-negative integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
+  - `min_buffer_ms`: non-negative integer - requested minimum ongoing buffer duration in milliseconds (0-5000) during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
   - `supported_commands`: string[] - subset of: 'volume', 'mute', 'set_output_delay', empty when the player accepts no commands
   - `format?`: object - the format the player currently prefers, which MUST be one of the entries in [`supported_formats`](#client--server-clienthello-playerv1-support-object). Absent means no overridden preference. See [format-selection rules](#client--server-clienthello-playerv1-support-object).
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
@@ -1281,7 +1363,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
 
 **Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
 
-**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Receive timestamps](#receive-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
+**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Receive timestamps](#receive-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. Players MUST clamp `min_buffer_ms` to the range 0-5000. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
 **Format preference:** When `format` changes while a `player` stream is active, the server re-derives the stream format and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the preference applies to the next stream the server starts (see [`stream/start`](#server--client-streamstart)). Clients can use this to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -1314,9 +1396,9 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
 
 The format MUST be one the client listed in its [`supported_formats`](#client--server-clienthello-playerv1-support-object).
 
-When the `player` object changes the format of an active stream, chunks sent before this message are in the previous format and chunks sent after it are in the new format. Servers MUST timestamp the first chunk in the new format to follow the last chunk in the previous format on the existing timeline, and MUST NOT resend audio already sent.
+When the `player` object changes the format of an active stream, chunks sent before this message are in the previous format and chunks sent after it are in the new format. Servers SHOULD timestamp the first chunk in the new format to start where the last chunk in the previous format ends on the existing timeline, MUST NOT timestamp it to start earlier, and MUST NOT resend audio already sent.
 
-Clients MUST keep buffered chunks and decode each chunk in the format that was in effect when it was received. A player that cannot switch its output between the formats it lists without a gap SHOULD list a single `sample_rate` and `channels` in [`supported_formats`](#client--server-clienthello-playerv1-support-object), in which case the server resamples for it.
+Clients MUST keep buffered chunks and decode each chunk in the format that was in effect when it was received, and SHOULD switch their output between formats without adding a gap. A player that cannot switch its output between the formats it lists without a gap SHOULD list a single `sample_rate` and `channels` in [`supported_formats`](#client--server-clienthello-playerv1-support-object), in which case the server resamples for it.
 
 ### Server → Client: `stream/clear` player
 
@@ -1332,6 +1414,8 @@ During an active stream, unavailable clients SHOULD discard otherwise valid audi
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
 - Bytes 9-12: send_ahead (big-endian uint32) - microseconds from the server's transmission of this message to `timestamp`
 - Rest of bytes: encoded audio frame
+
+An audio message shorter than 13 bytes is a protocol error: the client MUST close the connection.
 
 The timestamp indicates when the first audio sample in this chunk should be output. Clients MUST translate this server timestamp to their local clock using the [time filter](#clock-synchronization), subtracting their [`output_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients SHOULD compensate for any known processing delays (e.g., DAC latency, audio buffer delays) by accounting for these delays when submitting audio to the hardware.
 
@@ -1409,7 +1493,7 @@ The player renders decoded frames at their server timestamps translated to local
 **Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. Keep these one-shot corrections rare, as required by [Correction Quality](#correction-quality).
 
 ## Source messages
-This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (line sensing), and stream timestamped audio frames.
+This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, report whether they have input audio to offer, and stream timestamped audio frames.
 
 A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin). Such a device MUST NOT play its captured input locally. Like every player, it outputs only the stream the server distributes, so its output stays in sync with the rest of the group.
 
@@ -1418,20 +1502,6 @@ A device MAY implement both the `source` and `player` roles (e.g., a speaker wit
 A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. It timestamps each binary source audio message in the server time domain by inverting the filter's server-to-local mapping (`t_local = compute_client_time(t_server)`): for a capture at local time `t_capture` it sends the `t_server` that maps to it. The mapping is linear in the filter's offset and drift, so this inverse is well-defined; apply both offset and drift, not offset alone.
 
 **Unpaired access:** As `source@v1` exposes the server's audio stack to arbitrary input, activating it for an unauthenticated device requires explicit [approval](#unpaired-access). Approval implied by other use of the device, such as starting playback on it, does not extend to `source@v1`: the server leaves the role out of [`active_roles`](#server--client-serveractivate) until explicit approval. Clients with a privacy-sensitive input such as a microphone SHOULD ship with unpaired access disabled: the captured audio would otherwise be accessible to anyone on the network.
-
-### Client → Server: `client/hello` source@v1 support object
-
-The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
-
-- `source@v1_support`: object
-  - `features?`: object - optional feature hints
-    - `line_sense?`: boolean - true if source reports `signal`
-
-Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that supports the `source@v1` role MUST list the codecs it accepts in the [`source@v1_support`](#server--client-serverhello-sourcev1-support-object) object of `server/hello`. A source MUST announce only a listed codec in `client-stream/start` and MUST be able to produce `flac` or `pcm`, so that every server can accept its input.
-
-**Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
-
-A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
 
 ### Server → Client: `server/hello` source@v1 support object
 
@@ -1442,12 +1512,18 @@ The `source@v1_support` object in [`server/hello`](#server--client-serverhello) 
 
 A source MUST ignore codec identifiers it does not recognize.
 
+Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that supports the `source@v1` role MUST list the codecs it accepts in the [`source@v1_support`](#server--client-serverhello-sourcev1-support-object) object of `server/hello`. A source MUST announce only a listed codec in `client-stream/start` and MUST be able to produce `flac` or `pcm`, so that every server can accept its input.
+
+**Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
+
+A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
+
 ### Client → Server: `client/state` source object
 
 The `source` object in [`client/state`](#client--server-clientstate) has this structure:
 
 - `source`: object
-  - `signal?`: 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
+  - `signal`: 'present' | 'absent' - whether the source currently has input audio to offer
 
 ### Server → Client: `server/command` source object
 
@@ -1459,10 +1535,12 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls whether this source streams to the server:
-  - `start`: server requests the source to open an input stream. The command authorizes at most one opening. The client SHOULD promptly send `client-stream/start` and then send source audio chunks.
+  - `start`: server requests the source to open an input stream. The command authorizes at most one opening. The client SHOULD promptly send `client-stream/start` and then send source audio chunks, or decline the start.
   - `stop`: server requests the source to stop streaming. The client MUST clear any pending start authorization, stop sending source audio chunks and, if its input stream is open, send `client-stream/end`.
 
 A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
+
+A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` received while no input stream is open as a decline.
 
 The server MUST NOT send `start` unless the source role is active, `'playback'` is in the connection's [`activities`](#server--client-serveractivate), it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
@@ -1476,7 +1554,7 @@ Servers MUST NOT treat an otherwise valid `client-stream/start` as unsolicited s
 
 Streaming state is per-connection: a previously sent `start` does not survive reconnection, and a server that still wants the stream MUST send `command: "start"` again.
 
-A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
+A source reports `signal` in [`client/state`](#client--server-clientstate). It sets it from user actions, such as a button or a sharing toggle, from detecting audio on its input, or from both. A source fed by another device through an audio-only connection, such as an analog line-in, SHOULD detect from the input audio whether that device is playing. The server MAY use a change to `present` as a hint to send `command: "start"` and a change to `absent` as a hint to send `command: "stop"`, but the decision is server policy. The first `signal` the server receives after the source role is activated, or after the client reports `available: true` again, counts as a change.
 
 When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles` or dropping `'playback'` from `activities`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
 
@@ -1518,6 +1596,8 @@ Clients MUST send `client-stream/start` before the first audio chunk. Sending `c
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
 - Rest of bytes: encoded audio frame
+
+A source audio message shorter than 9 bytes is a protocol error: the server MUST close the connection.
 
 The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). It is the best-effort time the audio reached the input (ADC). For codecs with encoder delay, it refers to the capture time of the first sample the decoder will emit for the chunk. The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
 
@@ -1631,6 +1711,8 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
 
+`title`, `artist`, `album_artist` and `album` are [plain text](#definitions).
+
 #### Scheduled metadata updates
 
 A `metadata` object whose `timestamp` is in the future is a scheduled update: state that takes effect at that time (for example, the next track's metadata timed to the audible track change).
@@ -1729,6 +1811,8 @@ The fields are:
 
 The concatenated `data` of all parts is the encoded image; the transfer is complete when the received data reaches `total_size`. An announce with `total_size` `0` completes immediately, with no parts. An artwork message MUST NOT exceed 65519 bytes, so that it fits in a single Noise transport message without [fragmentation](#fragmentation).
 
+A client MAY discard an image whose `total_size` exceeds a limit it chooses. The limit SHOULD be large enough that no valid image it can receive exceeds it.
+
 At most one image transfer is in flight at a time across all of the role's channels: a transfer is in flight from its announce until it completes or its partly received image is discarded. The server MUST NOT announce an image, on any channel, while a transfer is in flight; to replace an image still in flight, it cancels that transfer first. The server MUST cancel an in-flight transfer before sending an artwork [`stream/end`](#server--client-streamend) or a [`stream/start`](#server--client-streamstart) that changes that transfer's channel configuration. Any other messages MAY be sent between the messages of a transfer.
 
 A server SHOULD pace a transfer's parts instead of sending them back to back. Artwork is not time critical, so spreading the parts out keeps a large image from delaying the other roles the connection carries, such as `player@v1` audio chunks.
@@ -1765,7 +1849,7 @@ The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthel
 - `visualizer@v1_support`: object
   - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting only each reassembled message's type byte, timestamp, and data
 
-The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` or `stream/end` resets this count.
+The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` or `stream/end` resets this count. An in-place `stream/start` does not.
 
 The requested data types, frame-rate cap, and spectrum configuration are dynamic and reported in the [`client/state`](#client--server-clientstate-visualizer-object) visualizer object.
 
@@ -1800,6 +1884,8 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
     - `f_min`: integer - lowest frequency in Hz
     - `f_max`: integer - highest frequency in Hz
 
+When the `visualizer` object updates an active stream, frames sent before this message use the previous configuration and frames sent after it use the new configuration. Clients MUST keep buffered frames and interpret each frame under the configuration in effect when it was received.
+
 ### Server → Client: `stream/clear` visualizer
 
 When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients MUST clear all buffered visualization data and continue with data received after this message.
@@ -1815,6 +1901,8 @@ Each visualization `type` has its own binary message type. Every message carries
 - Byte 0: message type (uint8, one of the types listed below)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients MUST translate this server timestamp to their local clock using the [time filter](#clock-synchronization)
 - Remaining bytes: data, layout per type below; all `uint16` fields are big-endian
+
+A visualization message shorter than 9 bytes is a protocol error: the client MUST close the connection.
 
 Data whose timestamp is already in the past on arrival is dropped; stale visualization frames are never rendered.
 
