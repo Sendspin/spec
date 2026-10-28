@@ -1380,8 +1380,6 @@ Request the player to perform an action, e.g., change volume or mute state.
 
 The server MUST NOT send a player command to a client before that client has sent its initial [`client/state`](#client--server-clientstate).
 
-While another admitted connection has `'playback'` in its [`activities`](#server--client-serveractivate), the client MUST ignore player commands from a connection without `'playback'`.
-
 ### Server → Client: `stream/start` player object
 
 The `player` object in [`stream/start`](#server--client-streamstart) has this structure:
