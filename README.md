@@ -188,7 +188,6 @@ Clients MUST NOT manually connect to servers while advertising `_sendspin._tcp`.
 A client admits one connection at a time. It MAY admit more, as long as the [`activities`](#server--client-serveractivate) the connections declare follow these rules:
 
 - At most one admitted connection has `'playback'` in its `activities`, and at most one has `'pairing'`. One connection MAY have both.
-- A connection with empty `activities` is admitted only while no other connection is admitted.
 
 Clients MUST persistently store the `server_id` of the server that most recently held an admitted connection while `'playback'` was among its `activities` (the "last-playback server").
 
