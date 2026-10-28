@@ -800,11 +800,12 @@ Clients may change their stream-configuration fields to adapt to changing networ
 
 ### Server → Client: `stream/clear`
 
-Clients MUST clear buffers for the specified roles without ending their streams. Used for seek operations and track jumps (switching to a different track without stopping the stream).
+Clients MUST clear buffers for the specified roles without ending their streams. Used for seek operations and track jumps (switching to a different track without stopping the stream). With `from_timestamp`, it clears only the data from that time on, for example to mix an announcement into the music or to change a next track that was already buffered.
 
 The server MUST NOT send this message when no targeted streams are active.
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
+- `from_timestamp?`: integer - server clock time in microseconds. If present, clients keep the buffered data before this time and clear only the data at or after it, as each targeted role defines
 - `roles?`: non-empty string[] - roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. Every listed role MUST have an active stream. If omitted, clears all active player and visualizer streams
 
 [Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
@@ -1338,7 +1339,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
   - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands`
   - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands`
   - `output_delay_ms`: integer - output delay in milliseconds (0-5000)
-  - `required_lead_time_ms`: non-negative integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server Audio Send Constraints](#server-audio-send-constraints)).
+  - `required_lead_time_ms`: non-negative integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead, except for a `stream/clear` with `from_timestamp` (see [Server Audio Send Constraints](#server-audio-send-constraints)).
   - `min_buffer_ms`: non-negative integer - requested minimum ongoing buffer duration in milliseconds (0-5000) during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
   - `supported_commands`: string[] - subset of: 'volume', 'mute', 'set_output_delay', empty when the player accepts no commands
   - `format?`: object - the format the player currently prefers, which MUST be one of the entries in [`supported_formats`](#client--server-clienthello-playerv1-support-object). Absent means no overridden preference. See [format-selection rules](#client--server-clienthello-playerv1-support-object).
@@ -1353,7 +1354,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
 
 **Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
 
-**Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
+**Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) without `from_timestamp` (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
 
 **Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Receive timestamps](#receive-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. Players MUST clamp `min_buffer_ms` to the range 0-5000. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
@@ -1393,6 +1394,8 @@ Clients MUST keep buffered chunks and decode each chunk in the format that was i
 ### Server → Client: `stream/clear` player
 
 When [`stream/clear`](#server--client-streamclear) includes the player role, clients MUST clear all buffered audio chunks and continue with chunks received after this message.
+
+When the message carries `from_timestamp`, clients MUST instead discard only the buffered chunks whose timestamp is at or after `from_timestamp`, keep playing the earlier chunks without interruption, and continue with chunks received after this message. Discarded chunks count as never sent. The first chunk after this message can therefore have an earlier timestamp than chunks received before it. The clear does not change the stream's format: chunks after it use the format of the latest `stream/start`. Servers MUST set `from_timestamp` to the timestamp of a chunk they sent in the current stream, and SHOULD timestamp the first chunk after this message to start at `from_timestamp` and MUST NOT timestamp it to start earlier.
 
 ### Server → Client: Audio Chunks (Binary)
 
@@ -1443,7 +1446,7 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 - **Chunk duration bounds:** A server MUST NOT send an audio chunk longer than 150 ms, and SHOULD NOT send one shorter than 15 ms (the final chunk of a stream or the chunk before a format change MAY be shorter).
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
-- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear), servers MUST schedule the first audio timestamp far enough in the future to satisfy each player's minimum send-ahead specified below. An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
+- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear) without `from_timestamp`, servers MUST schedule the first audio timestamp far enough in the future to satisfy each player's minimum send-ahead specified below. An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays. A `stream/clear` with `from_timestamp` also continues the existing timeline, and servers MUST set `from_timestamp` at least the larger of `min_buffer_ms` and `required_lead_time_ms`, plus `output_delay_ms`, after its `server_transmitted`.
 - Servers factor in each client's [`output_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
 - `required_lead_time_ms` is a hint that keeps the start of the stream from being cut off. The server schedules the first chunk at least `min_buffer_ms + output_delay_ms` ahead, and SHOULD extend the lead toward `required_lead_time_ms` only when doing so adds no latency, i.e. for buffered sources but not live streams.
 - For grouped playback, use a common send-ahead equal to the maximum per-player send-ahead across grouped players. Recompute when players join, leave, or update their timing parameters.
@@ -1458,7 +1461,7 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 Count only each audio chunk's 13-byte header and encoded payload. The server MUST NOT start sending a chunk if its full size plus the current count would exceed `buffer_capacity`. Count each chunk in full while transmission is unfinished or its completion time is in the future on the server's clock, regardless of decoding, partial playback, or discarded audio.
 
-To calculate completion time, convert the latest `output_delay_ms` received in `client/state` to microseconds and subtract it from the timestamp plus duration. Calculate duration in microseconds from decoded samples per channel and the sample rate under which the chunk was sent. The count starts empty. Sending a player `stream/clear` or `stream/end` resets it, removing previously sent chunks. A delay update recalculates completion times for all chunks sent since the last reset, including previously excluded chunks. An in-place `stream/start` does not reset the count or change earlier chunks' durations.
+To calculate completion time, convert the latest `output_delay_ms` received in `client/state` to microseconds and subtract it from the timestamp plus duration. Calculate duration in microseconds from decoded samples per channel and the sample rate under which the chunk was sent. The count starts empty. Sending a player `stream/clear` without `from_timestamp` or a `stream/end` resets it, removing previously sent chunks. A `stream/clear` with `from_timestamp` removes only the chunks it discards. A delay update recalculates completion times for all chunks sent since the last reset, including previously excluded chunks. An in-place `stream/start` does not reset the count or change earlier chunks' durations.
 
 ### Suggested correction strategy
 
@@ -1480,7 +1483,7 @@ The player renders decoded frames at their server timestamps translated to local
 
 **Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
 
-**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. Keep these one-shot corrections rare, as required by [Correction Quality](#correction-quality).
+**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear) without `from_timestamp`, or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. Keep these one-shot corrections rare, as required by [Correction Quality](#correction-quality).
 
 ## Source messages
 This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, report whether they have input audio to offer, and stream timestamped audio frames.
@@ -1839,7 +1842,7 @@ The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthel
 - `visualizer@v1_support`: object
   - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting only each reassembled message's type byte, timestamp, and data
 
-The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` or `stream/end` resets this count. An in-place `stream/start` does not.
+The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` without `from_timestamp` or a `stream/end` resets this count. A `stream/clear` with `from_timestamp` removes only the messages it discards. An in-place `stream/start` does not.
 
 The requested data types, frame-rate cap, and spectrum configuration are dynamic and reported in the [`client/state`](#client--server-clientstate-visualizer-object) visualizer object.
 
@@ -1879,6 +1882,8 @@ When the `visualizer` object updates an active stream, frames sent before this m
 ### Server → Client: `stream/clear` visualizer
 
 When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients MUST clear all buffered visualization data and continue with data received after this message.
+
+When the message carries `from_timestamp`, clients MUST instead discard only the buffered messages whose timestamp is at or after `from_timestamp`, keep the earlier ones, and continue with data received after this message. Discarded messages count as never sent. Until the next `stream/clear`, messages sent after it MUST NOT have a timestamp earlier than `from_timestamp`.
 
 ### Server → Client: Visualization Data (Binary)
 
