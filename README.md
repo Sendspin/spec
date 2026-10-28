@@ -1525,10 +1525,12 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls whether this source streams to the server:
-  - `start`: server requests the source to open an input stream. The command authorizes at most one opening. The client SHOULD promptly send `client-stream/start` and then send source audio chunks.
+  - `start`: server requests the source to open an input stream. The command authorizes at most one opening. The client SHOULD promptly send `client-stream/start` and then send source audio chunks, or decline the start.
   - `stop`: server requests the source to stop streaming. The client MUST clear any pending start authorization, stop sending source audio chunks and, if its input stream is open, send `client-stream/end`.
 
 A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
+
+A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` received while no input stream is open as a decline.
 
 The server MUST NOT send `start` unless the source role is active, it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
