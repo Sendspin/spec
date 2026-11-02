@@ -147,7 +147,7 @@ This mechanism only detects role-version skew, and only because roles are exchan
 
 Custom roles outside the specification start with `_` and MUST include an explicit version when advertised (e.g., `_myapp_controller@v1`, `_custom_display@v1`). To avoid collisions between independent vendors, custom role names SHOULD include a vendor-specific prefix (e.g., `_vendorname_role`).
 
-Their binary message IDs come from the unmanaged 192-255 range: an application-specific role's own definition assigns its IDs, and a client MUST NOT advertise two roles with conflicting IDs.
+Their binary message IDs come from the unmanaged 192-255 range: an application-specific role's own definition assigns its IDs. Versions of one role family MAY share IDs, but a client MUST NOT advertise roles of different families that use the same ID.
 
 ## Protocol evolution
 
