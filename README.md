@@ -1334,7 +1334,7 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 - `player@v1_support`: object
   - `supported_formats`: object[] - non-empty list of supported audio formats in priority order (first is preferred)
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
-    - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
+    - `channels`: integer - supported number of channels, 1-8 (e.g., 1 = mono, 2 = stereo); 1 or 2 for `opus`
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
   - `buffer_capacity`: integer - maximum total size in bytes of outstanding audio chunks, as defined in [Player Buffer Accounting](#player-buffer-accounting)
@@ -1344,6 +1344,17 @@ Servers MUST support `flac` at every combination of a `bit_depth` of 16 or 24, 1
 **Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
 
 For each [`stream/start`](#server--client-streamstart) the server SHOULD select the [`format`](#client--server-clientstate-player-object) the player's state currently prefers when one is set and the server can produce it for the current track, and otherwise the highest-priority `supported_formats` entry it can produce. It MAY select a different entry when warranted, for example to match a track's native sample rate and avoid resampling or to apply an operator-configured format, and MAY switch formats on a later track by sending a new `stream/start`.
+
+**Channel order:** Channels are ordered as in FLAC ([RFC 9639 section 9.1.3](https://www.rfc-editor.org/rfc/rfc9639#section-9.1.3)) for every codec:
+
+- 1: mono
+- 2: left, right
+- 3: left, right, center
+- 4: front left, front right, back left, back right
+- 5: front left, front right, front center, back/surround left, back/surround right
+- 6: front left, front right, front center, LFE, back/surround left, back/surround right
+- 7: front left, front right, front center, LFE, back center, side left, side right
+- 8: front left, front right, front center, LFE, back left, back right, side left, side right
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
@@ -1587,12 +1598,23 @@ The `source` object in [`client-stream/start`](#client--server-client-streamstar
 
 - `source`: object
   - `codec`: 'opus' | 'flac' | 'pcm'
-  - `channels`: integer
+  - `channels`: integer - number of channels, 1-8; 1 or 2 for `opus`
   - `sample_rate`: integer
   - `bit_depth`: integer - ignored for `opus`
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
 A `client-stream/start` with a `source` object received while an input stream is already open replaces the stream format in place.
+
+**Channel order:** Channels are ordered as in FLAC ([RFC 9639 section 9.1.3](https://www.rfc-editor.org/rfc/rfc9639#section-9.1.3)) for every codec:
+
+- 1: mono
+- 2: left, right
+- 3: left, right, center
+- 4: front left, front right, back left, back right
+- 5: front left, front right, front center, back/surround left, back/surround right
+- 6: front left, front right, front center, LFE, back/surround left, back/surround right
+- 7: front left, front right, front center, LFE, back center, side left, side right
+- 8: front left, front right, front center, LFE, back left, back right, side left, side right
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
