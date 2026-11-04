@@ -1699,7 +1699,7 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
   - `album_artist?`: string - album artist(s)
   - `album?`: string - name of the album or release that this track belongs to
   - `artwork_url?`: string - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
-  - `year?`: integer - release year in YYYY format
+  - `year?`: integer - release year (e.g., 2024)
   - `track?`: integer - track number on the album (1-indexed), absent if unknown or not applicable
   - `progress?`: object - playback progress information. Omitting it clears the client's position, so include it in every `metadata` state that has a position to report. The server MUST send a new `metadata` state whenever playback state changes (play, pause, resume, seek, playback speed change), unless the change was already conveyed by a scheduled update
     - `track_progress`: integer - playback position in milliseconds since start of track, measured at `timestamp`
