@@ -185,24 +185,29 @@ Clients MUST NOT manually connect to servers while advertising `_sendspin._tcp`.
 
 #### Multiple servers (server-initiated)
 
-A client holds at most one admitted connection at a time, except where noted below, classified by the highest-ranked activity in its declared [`activities`](#server--client-serveractivate); from highest to lowest:
+A client admits one connection at a time. It MAY admit more, as long as at most one admitted connection has `'playback'` in its [`activities`](#server--client-serveractivate) and at most one has `'pairing'`. One connection MAY have both.
+
+Clients MUST persistently store the `server_id` of the server that most recently held an admitted connection while `'playback'` was among its `activities` (the "last-playback server").
+
+When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its activities. The client arbitrates that activation and every later one, and MUST NOT arbitrate an activation that is not [admissible](#server--client-serveractivate).
+
+An activation conflicts with another admitted connection when it declares an activity, `'playback'` or `'pairing'`, that the other connection already has in its `activities`. On a client that admits only one connection at a time, an activation on a provisional connection always conflicts with the admitted connection. A client MAY cap how many connections it admits at once. When a client is at its cap and an activation on a provisional connection conflicts with no admitted connection, it conflicts with each admitted connection with empty `activities` instead, and the client rejects it if there is none. The client compares the activating connection with each connection it conflicts with, classifying each by the highest-ranked activity in its `activities`, and the activating connection by those the activation declares, from highest to lowest:
 
 - `'playback'`
 - `'pairing'`
 
-A connection with empty `activities` ranks lowest.
+A connection with empty `activities` ranks lowest. The activating connection wins when it ranks higher or equal, and loses when it ranks lower. Two exceptions:
 
-Clients MUST persistently store the `server_id` of the server that most recently held the admitted connection while `'playback'` was among its `activities` (the "last-playback server").
+- A connection with a [pairing attempt](#entering-and-leaving-pairing) in progress is not displaced: the activating connection loses against it.
+- When both connections have empty `activities`, the activating connection wins only if its `server_id` matches the last-playback server (and the other's does not).
 
-When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its priority. The client MUST NOT apply the priority rules to an activation that is not [admissible](#server--client-serveractivate). The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Three exceptions:
+The client applies an activation that conflicts with no connection or wins against every connection it conflicts with, admitting its connection if provisional, and displaces those connections. Otherwise it rejects the activating connection.
 
-- A [pairing attempt](#entering-and-leaving-pairing) is not displaced by an incoming `'playback'` or `'pairing'` connection.
-- When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
-- A client MAY admit one incoming `'pairing'` connection alongside the admitted `'playback'` connection, holding both. A client that does not admit both connections rejects the incoming with [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` and closes the connection. While both are held, further incoming connections are arbitrated against the `'playback'` holder. When a later `server/activate` drops `'pairing'` from that connection's `activities`, the client arbitrates it against the `'playback'` holder as if it were incoming.
+A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
 
-Subsequent `server/activate` updates do not otherwise trigger arbitration, even when a connection escalates its activities. A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
+A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected connection, provisional or admitted, receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if the rejected activation declares `'pairing'`). The client then closes the connection.
 
-A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
+A server that already holds a connection to a client MUST NOT open another connection to it for pairing. It pairs on the existing connection instead.
 
 ### Client Initiated Connections
 
@@ -436,7 +441,7 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules. A server MAY drop a `client/time` request while its reply to an earlier `client/time` is still waiting to be sent.
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
@@ -620,6 +625,8 @@ When a role version defines a support object, its key in `client/hello` or `serv
 
 If a role version requires a support object, the server MUST NOT activate that version when the object is missing from `client/hello`.
 
+A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST accept a `client/hello` within these limits and MAY close the connection on one that exceeds them.
+
 ### Server → Client: `server/activate`
 
 Declares the server's current purpose on this connection. Sent as an encrypted message (binary message, message type `0`). MAY be re-sent to change the activity set, active roles, or pairing parameters, subject to the activation and pairing rules.
@@ -652,22 +659,23 @@ When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if
 
 **Worked example (`pairing_required`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`.
 
-Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
+Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation. A server SHOULD declare `'playback'` while the client's group is playing or while it wants the client's `source` to stream, whatever roles are active, and drop it once neither is the case, not at a track change or while the client moves to another playing group.
 
 Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
 Role removal includes explicit removal from `active_roles`, implicit removal when the connection is no longer playback-capable, and replacement of an active role version.
 
-Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
+Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. Before a `server/activate` drops `'playback'` from `activities`, the server MUST send `stream/end` for the `player` and `visualizer` streams if they are active. If the first activation after a [re-handshake](#re-handshake) will remove such a role or drop `'playback'`, the server MUST send any required `stream/end` before starting the re-handshake.
 
 When applying a `server/activate`, the client MUST:
 
 - For every removed server-to-client stream role, stop its remaining output, clear its buffers, and release temporary output effects applied by that role, such as ducking. This applies even if an earlier `stream/end` allowed buffered data to finish playing.
+- For every removed role with an open client-to-server stream (`source`, or an application-specific role with such a stream), stop sending its binary data and send [`client-stream/end`](#client--server-client-streamend) for that role.
 - For every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role), immediately discard the current state and any pending scheduled update. No preceding `server/state` is required.
 
 State for roles that remain active at the same version is unchanged.
 
-Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
+Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
 
 Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, leaving their values unvalidated, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
@@ -794,7 +802,9 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 [Application-specific roles](#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
-The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`.
+The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
+
+On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start`, leaving their values unvalidated, and discard player audio and visualization data.
 
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
@@ -818,7 +828,7 @@ Ends the stream for one or more roles. Each side MUST treat the targeted streams
 
 For each specified role, clients MUST stop output and clear its buffers unless that role explicitly defines different completion behavior. In that case, clients MUST follow the role's rules, such as finishing playback of buffered data.
 
-For roles following a media queue, this message is expected to be sent when playback is over and the queue is empty. Specifically:
+For roles following a media queue, this message is expected to be sent when the group pauses, or when playback is over and the queue is empty. Specifically:
 
 - **Track transitions** (a track ends and the next begins naturally): stream commands SHOULD NOT be sent, except `stream/start` to update the existing stream configuration. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
 - **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
@@ -826,9 +836,27 @@ For roles following a media queue, this message is expected to be sent when play
 
 Servers MUST NOT send `stream/end` in these cases because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
+When a group pauses, the server MUST end the active `player` and `visualizer` streams, but not the `artwork` stream, and MUST send a new `stream/start` when playback resumes.
+
 The server MUST NOT send this message when no server-to-client streams are active.
 
 - `roles?`: non-empty string[] - roles to end streams for ('player', 'artwork', 'visualizer'). Every listed role MUST have an active stream. If omitted, ends all active streams
+
+[Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
+
+### Client → Server: `client-stream/start`
+
+Starts a client-to-server stream for one or more roles. If sent for a role whose stream is open, updates the stream configuration without ending the stream.
+
+- `source?`: object - only if the `source` role is active ([see source object details](#client--server-client-streamstart-source-object))
+
+[Application-specific roles](#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
+
+### Client → Server: `client-stream/end`
+
+Ends the client-to-server stream for one or more roles.
+
+- `roles?`: non-empty string[] - roles to end streams for ('[source](#client--server-client-streamend-source)'). If omitted, ends all open client-to-server streams
 
 [Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
 
@@ -840,7 +868,7 @@ The server MUST promptly send this message after the first `server/activate` on 
 
 Every message MUST carry all fields listed below.
 
-- `playback_state`: 'playing' | 'stopped' - playback state of the group
+- `playback_state`: 'playing' | 'stopped' - playback state of the group. A paused group reports `'stopped'`
 - `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
 - `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
 
@@ -1289,7 +1317,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 
 - `reason`: string - one of:
   - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
-  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client does not admit a pairing connection alongside its current admitted connection (see [Multiple servers](#multiple-servers-server-initiated))
+  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client rejected or displaced this pairing (see [Multiple servers](#multiple-servers-server-initiated))
   - `method_not_supported` (client) - the server's activity set and `pairing.method` are not a permitted combination for the matched PSK, or `pairing.method` names a method the client does not currently offer, or `pairing.format` names an emission format the client does not currently offer
   - `pairing_code_mismatch` (client or server) - PAKE key-confirmation failed
   - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
@@ -1511,7 +1539,7 @@ Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that 
 
 **Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
 
-A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
+A source announces its input format in [`client-stream/start`](#client--server-client-streamstart-source-object); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
 
 ### Client → Server: `client/state` source object
 
@@ -1535,11 +1563,11 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
 
-A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` received while no input stream is open as a decline.
+A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` that lists `source` or omits `roles`, received while no input stream is open, as a decline.
 
-The server MUST NOT send `start` unless the source role is active, it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
+The server MUST NOT send `start` unless the source role is active, `'playback'` is in the connection's [`activities`](#server--client-serveractivate), it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
-A client MUST ignore `start` received while it is unavailable. Becoming available again does not resume streaming without a new `start`.
+A client MUST ignore `start` received while it is unavailable or while `'playback'` is not in the connection's `activities`. Becoming available again does not resume streaming without a new `start`.
 
 #### Default streaming behavior
 
@@ -1551,13 +1579,13 @@ Streaming state is per-connection: a previously sent `start` does not survive re
 
 A source reports `signal` in [`client/state`](#client--server-clientstate). It sets it from user actions, such as a button or a sharing toggle, from detecting audio on its input, or from both. A source fed by another device through an audio-only connection, such as an analog line-in, SHOULD detect from the input audio whether that device is playing. The server MAY use a change to `present` as a hint to send `command: "start"` and a change to `absent` as a hint to send `command: "stop"`, but the decision is server policy. The first `signal` the server receives after the source role is activated, or after the client reports `available: true` again, counts as a change.
 
-When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
+When the client receives a [`server/activate`](#server--client-serveractivate) removing `source` from `active_roles` or dropping `'playback'` from `activities`, it MUST clear any pending start authorization, stop sending chunks, and send `client-stream/end` if its input stream is open. After reactivation, the client MUST NOT resume streaming until it receives a new `start`.
 
 A source that becomes unavailable MUST clear any pending start authorization. If its input stream is open, it MUST stop sending source audio chunks and send `client-stream/end` before reporting [`available: false`](#external-source-handling) in `client/state`. The server treats the transition as an implicit `stop`.
 
-### Client → Server: `client-stream/start`
+### Client → Server: `client-stream/start` source object
 
-The `client-stream/start` message announces the active input stream format and provides any required codec header data.
+The `source` object in [`client-stream/start`](#client--server-client-streamstart) announces the active input stream format and provides any required codec header data. It has this structure:
 
 - `source`: object
   - `codec`: 'opus' | 'flac' | 'pcm'
@@ -1566,7 +1594,7 @@ The `client-stream/start` message announces the active input stream format and p
   - `bit_depth`: integer - ignored for `opus`
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
-A `client-stream/start` received while an input stream is already open replaces the stream format in place.
+A `client-stream/start` with a `source` object received while an input stream is already open replaces the stream format in place.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
@@ -1578,15 +1606,15 @@ A `client-stream/start` received while an input stream is already open replaces 
 
 `codec_header` uses standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included).
 
-### Client → Server: `client-stream/end`
+### Client → Server: `client-stream/end` source
 
-The client ends the current input stream. After sending this message, the client MUST NOT send another `client-stream/start` until it receives a new server `start`. Source audio MUST NOT resume before that `client-stream/start`.
+A [`client-stream/end`](#client--server-client-streamend) that lists `source` or omits `roles` ends the current input stream. After sending one, the client MUST NOT send another `client-stream/start` with a `source` object until it receives a new server `start`. Source audio MUST NOT resume before that `client-stream/start`.
 
 ### Client → Server: Source Audio Chunks (Binary)
 
 Receiving a source audio message without an open input stream, or while the latest [`client/state`](#client--server-clientstate) received by the server reports `available: false`, is a protocol error: the server MUST close the connection. The client's stream lifecycle messages, audio chunks, and availability updates are delivered in send order on the same connection, so network delay cannot move earlier chunks past `client-stream/end` or an availability update.
 
-Clients MUST send `client-stream/start` before the first audio chunk. Sending `command: "stop"` or removing the source role does not itself close an input stream at the server. After either action, the server MUST tolerate otherwise valid in-flight responses to a previously sent `start`, including `client-stream/start` and audio chunks, until it receives `client-stream/end`. It MAY discard audio payloads but MUST process `client-stream/start` and `client-stream/end` in received order.
+Clients MUST send `client-stream/start` before the first audio chunk. Sending `command: "stop"`, removing the source role, or dropping `'playback'` does not itself close an input stream at the server. After any of these, the server MUST tolerate otherwise valid in-flight responses to a previously sent `start`, including `client-stream/start` and audio chunks, until it receives `client-stream/end`. It MAY discard audio payloads but MUST process `client-stream/start` and `client-stream/end` in received order.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured

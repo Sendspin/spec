@@ -115,7 +115,7 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules. A server MAY drop a `client/time` request while its reply to an earlier `client/time` is still waiting to be sent.
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
@@ -299,6 +299,8 @@ When a role version defines a support object, its key in `client/hello` or `serv
 
 If a role version requires a support object, the server MUST NOT activate that version when the object is missing from `client/hello`.
 
+A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST accept a `client/hello` within these limits and MAY close the connection on one that exceeds them.
+
 ### Server → Client: `server/activate`
 
 Declares the server's current purpose on this connection. Sent as an encrypted message (binary message, message type `0`). MAY be re-sent to change the activity set, active roles, or pairing parameters, subject to the activation and pairing rules.
@@ -331,22 +333,23 @@ When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if
 
 **Worked example (`pairing_required`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`.
 
-Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
+Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation. A server SHOULD declare `'playback'` while the client's group is playing or while it wants the client's `source` to stream, whatever roles are active, and drop it once neither is the case, not at a track change or while the client moves to another playing group.
 
 Servers normally activate the client's [preferred](README.md#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
 Role removal includes explicit removal from `active_roles`, implicit removal when the connection is no longer playback-capable, and replacement of an active role version.
 
-Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
+Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. Before a `server/activate` drops `'playback'` from `activities`, the server MUST send `stream/end` for the `player` and `visualizer` streams if they are active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role or drop `'playback'`, the server MUST send any required `stream/end` before starting the re-handshake.
 
 When applying a `server/activate`, the client MUST:
 
 - For every removed server-to-client stream role, stop its remaining output, clear its buffers, and release temporary output effects applied by that role, such as ducking. This applies even if an earlier `stream/end` allowed buffered data to finish playing.
+- For every removed role with an open client-to-server stream (`source`, or an application-specific role with such a stream), stop sending its binary data and send [`client-stream/end`](#client--server-client-streamend) for that role.
 - For every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role), immediately discard the current state and any pending scheduled update. No preceding `server/state` is required.
 
 State for roles that remain active at the same version is unchanged.
 
-Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
+Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
 
 Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, leaving their values unvalidated, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
@@ -473,7 +476,9 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 [Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
-The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`.
+The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
+
+On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start`, leaving their values unvalidated, and discard player audio and visualization data.
 
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
@@ -497,7 +502,7 @@ Ends the stream for one or more roles. Each side MUST treat the targeted streams
 
 For each specified role, clients MUST stop output and clear its buffers unless that role explicitly defines different completion behavior. In that case, clients MUST follow the role's rules, such as finishing playback of buffered data.
 
-For roles following a media queue, this message is expected to be sent when playback is over and the queue is empty. Specifically:
+For roles following a media queue, this message is expected to be sent when the group pauses, or when playback is over and the queue is empty. Specifically:
 
 - **Track transitions** (a track ends and the next begins naturally): stream commands SHOULD NOT be sent, except `stream/start` to update the existing stream configuration. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
 - **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
@@ -505,9 +510,27 @@ For roles following a media queue, this message is expected to be sent when play
 
 Servers MUST NOT send `stream/end` in these cases because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
+When a group pauses, the server MUST end the active `player` and `visualizer` streams, but not the `artwork` stream, and MUST send a new `stream/start` when playback resumes.
+
 The server MUST NOT send this message when no server-to-client streams are active.
 
 - `roles?`: non-empty string[] - roles to end streams for ('player', 'artwork', 'visualizer'). Every listed role MUST have an active stream. If omitted, ends all active streams
+
+[Application-specific roles](README.md#application-specific-roles) MAY also be included in this array (names starting with `_`).
+
+### Client → Server: `client-stream/start`
+
+Starts a client-to-server stream for one or more roles. If sent for a role whose stream is open, updates the stream configuration without ending the stream.
+
+- `source?`: object - only if the `source` role is active ([see source object details](roles/source/v1.md#client--server-client-streamstart-source-object))
+
+[Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
+
+### Client → Server: `client-stream/end`
+
+Ends the client-to-server stream for one or more roles.
+
+- `roles?`: non-empty string[] - roles to end streams for ('[source](roles/source/v1.md#client--server-client-streamend-source)'). If omitted, ends all open client-to-server streams
 
 [Application-specific roles](README.md#application-specific-roles) MAY also be included in this array (names starting with `_`).
 
@@ -519,7 +542,7 @@ The server MUST promptly send this message after the first `server/activate` on 
 
 Every message MUST carry all fields listed below.
 
-- `playback_state`: 'playing' | 'stopped' - playback state of the group
+- `playback_state`: 'playing' | 'stopped' - playback state of the group. A paused group reports `'stopped'`
 - `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
 - `group_name`: string - friendly name of the group, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
 
