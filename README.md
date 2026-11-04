@@ -586,7 +586,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
-- `name`: string - friendly name of the server, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
+- `name`: string - friendly name of the server, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 - `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](#server--client-serverhello-sourcev1-support-object))
 
@@ -842,7 +842,7 @@ Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
 - `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
-- `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
+- `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
 
 ### Server → Client: `server/unpair`
 
@@ -1218,7 +1218,7 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or the [round limit](#rounds) holds it back. Sent immediately on receiving such a pairing [`server/activate`](#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state and any `message` to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
 
 - `pairing_index`: integer - see [Pairing index](#messages)
-- `message?`: string - a short [plain text](#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device and truncates it to that length
+- `message?`: string - a short [plain text](#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device
 
 #### Client → Server: `client/pair-init`
 
@@ -1751,7 +1751,7 @@ The `artwork` object in [`client/state`](#client--server-clientstate) has this s
     - `width?`: integer - width in pixels of the delivered image. Required unless `source` is `'none'`
     - `height?`: integer - height in pixels of the delivered image. Required unless `source` is `'none'`
 
-The `channels` array is positional from channel 0 (length 1-4). A channel index the array does not cover is `source: 'none'`, so a client MAY truncate the array after its last active channel. An `artwork` object whose `channels` array is longer than 4 is a protocol error; the server SHOULD close the connection.
+The `channels` array is positional from channel 0 (length 1-4). A channel index the array does not cover is `source: 'none'`, so a client MAY truncate the array after its last active channel.
 
 **Note:** Clients can use 1-4 independent artwork channels depending on their display capabilities. Channel 0 uses binary message type 8, channel 1 uses type 9, etc.
 
