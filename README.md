@@ -204,6 +204,8 @@ Subsequent `server/activate` updates do not otherwise trigger arbitration, even 
 
 A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
 
+A server that already holds a connection to a client MUST NOT open another connection to it for pairing. It pairs on the existing connection instead.
+
 ### Client Initiated Connections
 
 If clients prefer to initiate the connection instead of waiting for the server to connect, the server MUST be discoverable via mDNS using:
