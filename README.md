@@ -1751,7 +1751,7 @@ The `artwork` object in [`client/state`](#client--server-clientstate) has this s
     - `width?`: integer - width in pixels of the delivered image. Required unless `source` is `'none'`
     - `height?`: integer - height in pixels of the delivered image. Required unless `source` is `'none'`
 
-The `channels` array is positional from channel 0 (length 1-4). A channel index the array does not cover is `source: 'none'`, so a client MAY truncate the array after its last active channel.
+The `channels` array is positional from channel 0 (length 1-4). A channel index the array does not cover is `source: 'none'`, so a client MAY truncate the array after its last active channel, keeping at least one entry.
 
 **Note:** Clients can use 1-4 independent artwork channels depending on their display capabilities. Channel 0 uses binary message type 8, channel 1 uses type 9, etc.
 
