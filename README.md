@@ -816,13 +816,15 @@ Ends the stream for one or more roles. Each side MUST treat the targeted streams
 
 For each specified role, clients MUST stop output and clear its buffers unless that role explicitly defines different completion behavior. In that case, clients MUST follow the role's rules, such as finishing playback of buffered data.
 
-For roles following a media queue, this message is expected to be sent when playback is over and the queue is empty. Specifically:
+For roles following a media queue, this message is expected to be sent when the group pauses, or when playback is over and the queue is empty. Specifically:
 
 - **Track transitions** (a track ends and the next begins naturally): stream commands SHOULD NOT be sent, except `stream/start` to update the existing stream configuration. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
 - **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
 - **Track jumps** (skipping to a different track): treat identically to a seek, sending `stream/clear` instead of `stream/end`. Conceptually, the entire queue is a single continuous stream.
 
 Servers MUST NOT send `stream/end` in these cases because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
+
+When a group pauses, the server MUST end the active `player` and `visualizer` streams, but not the `artwork` stream, and MUST send a new `stream/start` when playback resumes.
 
 The server MUST NOT send this message when no server-to-client streams are active.
 
@@ -838,7 +840,7 @@ The server MUST promptly send this message after the first `server/activate` on 
 
 Every message MUST carry all fields listed below.
 
-- `playback_state`: 'playing' | 'stopped' - playback state of the group
+- `playback_state`: 'playing' | 'stopped' - playback state of the group. A paused group reports `'stopped'`
 - `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
 - `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
 
