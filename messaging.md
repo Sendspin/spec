@@ -297,6 +297,8 @@ When a role version defines a support object, its key in `client/hello` or `serv
 
 If a role version requires a support object, the server MUST NOT activate that version when the object is missing from `client/hello`.
 
+A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST accept a `client/hello` within these limits and MAY close the connection on one that exceeds them.
+
 ### Server → Client: `server/activate`
 
 Declares the server's current purpose on this connection. Sent as an encrypted message (binary message, message type `0`). MAY be re-sent to change the activity set, active roles, or pairing parameters, subject to the activation and pairing rules.
