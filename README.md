@@ -1930,7 +1930,7 @@ Tracks the dominant FFT bin, which is not always the fundamental: strong harmoni
 
 - 2*n bytes: `uint16[n]` bins from low to high frequency. `n` = `n_disp_bins` in [`stream/start`](#server--client-streamstart-visualizer-object)
 
-Magnitude per display bin (see scaling above). Servers MAY impose an implementation-defined upper bound on `n_disp_bins` to keep per-frame size sensible, but MUST serve up to 256 bins. When the requested `n_disp_bins` exceeds the bound, the server leaves 'spectrum' out of `types` in [`stream/start`](#server--client-streamstart-visualizer-object).
+Magnitude per display bin (see scaling above). Servers MAY impose an implementation-defined upper bound of at least 256 on `n_disp_bins` to keep per-frame size sensible. When the requested `n_disp_bins` exceeds the bound, the server leaves 'spectrum' out of `types` in [`stream/start`](#server--client-streamstart-visualizer-object).
 
 Bin edge `i`, for `i` from 0 to `n_disp_bins`, is the frequency `f` where `s(f) = s(f_min) + i * (s(f_max) - s(f_min)) / n_disp_bins`, with `s` the `scale` mapping from [`client/state`](#client--server-clientstate-visualizer-object). For 'log', an `f_min` below 1 Hz counts as 1 Hz. Display bin `i` covers frequencies from edge `i` up to, but not including, edge `i + 1`. Each bin MUST sum the power in its range rather than average it. A bin entirely above half the sample rate the server analyzes at reads 0. Servers SHOULD give every other bin a level, even when the bin is narrower than the analysis frequency resolution.
 
