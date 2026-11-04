@@ -479,11 +479,12 @@ Clients may change their stream-configuration fields to adapt to changing networ
 
 ### Server → Client: `stream/clear`
 
-Clients MUST clear buffers for the specified roles without ending their streams. Used for seek operations and track jumps (switching to a different track without stopping the stream).
+Clients MUST clear buffers for the specified roles without ending their streams. Used for seek operations and track jumps (switching to a different track without stopping the stream). With `from_timestamp`, it clears only the data from that time on, for example to mix an announcement into the music or to change a next track that was already buffered.
 
 The server MUST NOT send this message when no targeted streams are active.
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
+- `from_timestamp?`: integer - server clock time in microseconds. If present, clients keep the buffered data before this time and clear only the data at or after it, as each targeted role defines
 - `roles?`: non-empty string[] - roles to clear: '[player](roles/player/v1.md#server--client-streamclear-player)', '[visualizer](roles/visualizer/v1.md#server--client-streamclear-visualizer)', or both. Every listed role MUST have an active stream. If omitted, clears all active player and visualizer streams
 
 [Application-specific roles](README.md#application-specific-roles) MAY also be included in this array (names starting with `_`).
