@@ -661,11 +661,12 @@ Before a `server/activate` removes a server-to-client stream role (`player`, `ar
 When applying a `server/activate`, the client MUST:
 
 - For every removed server-to-client stream role, stop its remaining output, clear its buffers, and release temporary output effects applied by that role, such as ducking. This applies even if an earlier `stream/end` allowed buffered data to finish playing.
+- For every removed role with an open client-to-server stream (`source`, or an application-specific role with such a stream), stop sending its binary data and send [`client-stream/end`](#client--server-client-streamend) for that role.
 - For every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role), immediately discard the current state and any pending scheduled update. No preceding `server/state` is required.
 
 State for roles that remain active at the same version is unchanged.
 
-Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
+Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
 
 Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
@@ -827,6 +828,22 @@ Servers MUST NOT send `stream/end` in these cases because it signals actual play
 The server MUST NOT send this message when no server-to-client streams are active.
 
 - `roles?`: non-empty string[] - roles to end streams for ('player', 'artwork', 'visualizer'). Every listed role MUST have an active stream. If omitted, ends all active streams
+
+[Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
+
+### Client → Server: `client-stream/start`
+
+Starts a client-to-server stream for one or more roles. If sent for a role whose stream is open, updates the stream configuration without ending the stream.
+
+- `source?`: object - only if the `source` role is active ([see source object details](#client--server-client-streamstart-source-object))
+
+[Application-specific roles](#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
+
+### Client → Server: `client-stream/end`
+
+Ends the client-to-server stream for one or more roles.
+
+- `roles?`: non-empty string[] - roles to end streams for ('[source](#client--server-client-streamend-source)'). If omitted, ends all open client-to-server streams
 
 [Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
 
@@ -1509,7 +1526,7 @@ Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that 
 
 **Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
 
-A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
+A source announces its input format in [`client-stream/start`](#client--server-client-streamstart-source-object); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
 
 ### Client → Server: `client/state` source object
 
@@ -1533,7 +1550,7 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
 
-A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` received while no input stream is open as a decline.
+A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` that lists `source` or omits `roles`, received while no input stream is open, as a decline.
 
 The server MUST NOT send `start` unless the source role is active, it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
@@ -1553,9 +1570,9 @@ When the client receives a [`server/activate`](#server--client-serveractivate) r
 
 A source that becomes unavailable MUST clear any pending start authorization. If its input stream is open, it MUST stop sending source audio chunks and send `client-stream/end` before reporting [`available: false`](#external-source-handling) in `client/state`. The server treats the transition as an implicit `stop`.
 
-### Client → Server: `client-stream/start`
+### Client → Server: `client-stream/start` source object
 
-The `client-stream/start` message announces the active input stream format and provides any required codec header data.
+The `source` object in [`client-stream/start`](#client--server-client-streamstart) announces the active input stream format and provides any required codec header data. It has this structure:
 
 - `source`: object
   - `codec`: 'opus' | 'flac' | 'pcm'
@@ -1564,7 +1581,7 @@ The `client-stream/start` message announces the active input stream format and p
   - `bit_depth`: integer - ignored for `opus`
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
-A `client-stream/start` received while an input stream is already open replaces the stream format in place.
+A `client-stream/start` with a `source` object received while an input stream is already open replaces the stream format in place.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
@@ -1576,9 +1593,9 @@ A `client-stream/start` received while an input stream is already open replaces 
 
 `codec_header` uses standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included).
 
-### Client → Server: `client-stream/end`
+### Client → Server: `client-stream/end` source
 
-The client ends the current input stream. After sending this message, the client MUST NOT send another `client-stream/start` until it receives a new server `start`. Source audio MUST NOT resume before that `client-stream/start`.
+A [`client-stream/end`](#client--server-client-streamend) that lists `source` or omits `roles` ends the current input stream. After sending one, the client MUST NOT send another `client-stream/start` with a `source` object until it receives a new server `start`. Source audio MUST NOT resume before that `client-stream/start`.
 
 ### Client → Server: Source Audio Chunks (Binary)
 
