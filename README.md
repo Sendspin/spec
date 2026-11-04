@@ -204,6 +204,8 @@ Subsequent `server/activate` updates do not otherwise trigger arbitration, even 
 
 A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
 
+A server that already holds a connection to a client MUST NOT open another connection to it for pairing. It pairs on the existing connection instead.
+
 ### Client Initiated Connections
 
 If clients prefer to initiate the connection instead of waiting for the server to connect, the server MUST be discoverable via mDNS using:
@@ -434,7 +436,7 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules. A server MAY drop a `client/time` request while its reply to an earlier `client/time` is still waiting to be sent.
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
@@ -618,6 +620,8 @@ When a role version defines a support object, its key in `client/hello` or `serv
 
 If a role version requires a support object, the server MUST NOT activate that version when the object is missing from `client/hello`.
 
+A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST accept a `client/hello` within these limits and MAY close the connection on one that exceeds them.
+
 ### Server → Client: `server/activate`
 
 Declares the server's current purpose on this connection. Sent as an encrypted message (binary message, message type `0`). MAY be re-sent to change the activity set, active roles, or pairing parameters, subject to the activation and pairing rules.
@@ -661,11 +665,12 @@ Before a `server/activate` removes a server-to-client stream role (`player`, `ar
 When applying a `server/activate`, the client MUST:
 
 - For every removed server-to-client stream role, stop its remaining output, clear its buffers, and release temporary output effects applied by that role, such as ducking. This applies even if an earlier `stream/end` allowed buffered data to finish playing.
+- For every removed role with an open client-to-server stream (`source`, or an application-specific role with such a stream), stop sending its binary data and send [`client-stream/end`](#client--server-client-streamend) for that role.
 - For every removed role that defines a [`server/state`](#server--client-serverstate) object (`metadata`, `color`, `controller`, or an application-specific role), immediately discard the current state and any pending scheduled update. No preceding `server/state` is required.
 
 State for roles that remain active at the same version is unchanged.
 
-Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Client-level fields and objects for active roles are processed normally.
+Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
 
 Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
@@ -800,11 +805,12 @@ Clients may change their stream-configuration fields to adapt to changing networ
 
 ### Server → Client: `stream/clear`
 
-Clients MUST clear buffers for the specified roles without ending their streams. Used for seek operations and track jumps (switching to a different track without stopping the stream).
+Clients MUST clear buffers for the specified roles without ending their streams. Used for seek operations and track jumps (switching to a different track without stopping the stream). With `from_timestamp`, it clears only the data from that time on, for example to mix an announcement into the music or to change a next track that was already buffered.
 
 The server MUST NOT send this message when no targeted streams are active.
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
+- `from_timestamp?`: integer - server clock time in microseconds. If present, clients keep the buffered data before this time and clear only the data at or after it, as each targeted role defines
 - `roles?`: non-empty string[] - roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. Every listed role MUST have an active stream. If omitted, clears all active player and visualizer streams
 
 [Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
@@ -815,7 +821,7 @@ Ends the stream for one or more roles. Each side MUST treat the targeted streams
 
 For each specified role, clients MUST stop output and clear its buffers unless that role explicitly defines different completion behavior. In that case, clients MUST follow the role's rules, such as finishing playback of buffered data.
 
-For roles following a media queue, this message is expected to be sent when playback is over and the queue is empty. Specifically:
+For roles following a media queue, this message is expected to be sent when the group pauses, or when playback is over and the queue is empty. Specifically:
 
 - **Track transitions** (a track ends and the next begins naturally): stream commands SHOULD NOT be sent, except `stream/start` to update the existing stream configuration. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
 - **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
@@ -823,9 +829,27 @@ For roles following a media queue, this message is expected to be sent when play
 
 Servers MUST NOT send `stream/end` in these cases because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
+When a group pauses, the server MUST end the active `player` and `visualizer` streams, but not the `artwork` stream, and MUST send a new `stream/start` when playback resumes.
+
 The server MUST NOT send this message when no server-to-client streams are active.
 
 - `roles?`: non-empty string[] - roles to end streams for ('player', 'artwork', 'visualizer'). Every listed role MUST have an active stream. If omitted, ends all active streams
+
+[Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
+
+### Client → Server: `client-stream/start`
+
+Starts a client-to-server stream for one or more roles. If sent for a role whose stream is open, updates the stream configuration without ending the stream.
+
+- `source?`: object - only if the `source` role is active ([see source object details](#client--server-client-streamstart-source-object))
+
+[Application-specific roles](#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
+
+### Client → Server: `client-stream/end`
+
+Ends the client-to-server stream for one or more roles.
+
+- `roles?`: non-empty string[] - roles to end streams for ('[source](#client--server-client-streamend-source)'). If omitted, ends all open client-to-server streams
 
 [Application-specific roles](#application-specific-roles) MAY also be included in this array (names starting with `_`).
 
@@ -837,7 +861,7 @@ The server MUST promptly send this message after the first `server/activate` on 
 
 Every message MUST carry all fields listed below.
 
-- `playback_state`: 'playing' | 'stopped' - playback state of the group
+- `playback_state`: 'playing' | 'stopped' - playback state of the group. A paused group reports `'stopped'`
 - `group_id`: string - identifier of the group this client is part of: 32 bytes chosen by the server, base64url-encoded without padding (43 characters). A value that is not 43 base64url characters is a protocol error; the client SHOULD close the connection. The identifier MUST NOT change while the group exists, but MAY change after a server restart
 - `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
 
@@ -1338,7 +1362,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
   - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands`
   - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands`
   - `output_delay_ms`: integer - output delay in milliseconds (0-5000)
-  - `required_lead_time_ms`: non-negative integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server Audio Send Constraints](#server-audio-send-constraints)).
+  - `required_lead_time_ms`: non-negative integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead, except for a `stream/clear` with `from_timestamp` (see [Server Audio Send Constraints](#server-audio-send-constraints)).
   - `min_buffer_ms`: non-negative integer - requested minimum ongoing buffer duration in milliseconds (0-5000) during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
   - `supported_commands`: string[] - subset of: 'volume', 'mute', 'set_output_delay', empty when the player accepts no commands
   - `format?`: object - the format the player currently prefers, which MUST be one of the entries in [`supported_formats`](#client--server-clienthello-playerv1-support-object). Absent means no overridden preference. See [format-selection rules](#client--server-clienthello-playerv1-support-object).
@@ -1353,7 +1377,7 @@ State updates MUST be sent whenever a field in the `player` state object changes
 
 **Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
 
-**Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
+**Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) without `from_timestamp` (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. While a stream is running, the reported value MUST be at least the most audio the client can have buffered in its audio backend (e.g., a driver or hardware buffer) that still plays after a [`stream/clear`](#server--client-streamclear-player). Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
 
 **Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Receive timestamps](#receive-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. Players MUST clamp `min_buffer_ms` to the range 0-5000. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
@@ -1393,6 +1417,8 @@ Clients MUST keep buffered chunks and decode each chunk in the format that was i
 ### Server → Client: `stream/clear` player
 
 When [`stream/clear`](#server--client-streamclear) includes the player role, clients MUST clear all buffered audio chunks and continue with chunks received after this message.
+
+When the message carries `from_timestamp`, clients MUST instead discard only the buffered chunks whose timestamp is at or after `from_timestamp`, keep playing the earlier chunks without interruption, and continue with chunks received after this message. Discarded chunks count as never sent. If audio at or after `from_timestamp` is already buffered in the client's audio backend and the client cannot discard it, that audio still plays, and the client MUST drop the audio of chunks received after this message up to where it ends. The first chunk after this message can therefore have an earlier timestamp than chunks received before it. The clear does not change the stream's format: chunks after it use the format of the latest `stream/start`. Servers MUST set `from_timestamp` to the timestamp of a chunk they sent in the current stream, and SHOULD timestamp the first chunk after this message to start at `from_timestamp` and MUST NOT timestamp it to start earlier.
 
 ### Server → Client: Audio Chunks (Binary)
 
@@ -1443,7 +1469,7 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 - **Chunk duration bounds:** A server MUST NOT send an audio chunk longer than 150 ms, and SHOULD NOT send one shorter than 15 ms (the final chunk of a stream or the chunk before a format change MAY be shorter).
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
-- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear), servers MUST schedule the first audio timestamp far enough in the future to satisfy each player's minimum send-ahead specified below. An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
+- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear) without `from_timestamp`, servers MUST schedule the first audio timestamp far enough in the future to satisfy each player's minimum send-ahead specified below. An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays. A `stream/clear` with `from_timestamp` also continues the existing timeline, and servers MUST set `from_timestamp` at least the larger of `min_buffer_ms` and `required_lead_time_ms`, plus `output_delay_ms`, after its `server_transmitted`.
 - Servers factor in each client's [`output_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
 - `required_lead_time_ms` is a hint that keeps the start of the stream from being cut off. The server schedules the first chunk at least `min_buffer_ms + output_delay_ms` ahead, and SHOULD extend the lead toward `required_lead_time_ms` only when doing so adds no latency, i.e. for buffered sources but not live streams.
 - For grouped playback, use a common send-ahead equal to the maximum per-player send-ahead across grouped players. Recompute when players join, leave, or update their timing parameters.
@@ -1458,7 +1484,7 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 Count only each audio chunk's 13-byte header and encoded payload. The server MUST NOT start sending a chunk if its full size plus the current count would exceed `buffer_capacity`. Count each chunk in full while transmission is unfinished or its completion time is in the future on the server's clock, regardless of decoding, partial playback, or discarded audio.
 
-To calculate completion time, convert the latest `output_delay_ms` received in `client/state` to microseconds and subtract it from the timestamp plus duration. Calculate duration in microseconds from decoded samples per channel and the sample rate under which the chunk was sent. The count starts empty. Sending a player `stream/clear` or `stream/end` resets it, removing previously sent chunks. A delay update recalculates completion times for all chunks sent since the last reset, including previously excluded chunks. An in-place `stream/start` does not reset the count or change earlier chunks' durations.
+To calculate completion time, convert the latest `output_delay_ms` received in `client/state` to microseconds and subtract it from the timestamp plus duration. Calculate duration in microseconds from decoded samples per channel and the sample rate under which the chunk was sent. The count starts empty. Sending a player `stream/clear` without `from_timestamp` or a `stream/end` resets it, removing previously sent chunks. A `stream/clear` with `from_timestamp` removes only the chunks it discards. A delay update recalculates completion times for all chunks sent since the last reset, including previously excluded chunks. An in-place `stream/start` does not reset the count or change earlier chunks' durations.
 
 ### Suggested correction strategy
 
@@ -1480,7 +1506,7 @@ The player renders decoded frames at their server timestamps translated to local
 
 **Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
 
-**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. Keep these one-shot corrections rare, as required by [Correction Quality](#correction-quality).
+**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear) without `from_timestamp`, or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. Keep these one-shot corrections rare, as required by [Correction Quality](#correction-quality).
 
 ## Source messages
 This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, report whether they have input audio to offer, and stream timestamped audio frames.
@@ -1506,7 +1532,7 @@ Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that 
 
 **Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
 
-A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
+A source announces its input format in [`client-stream/start`](#client--server-client-streamstart-source-object); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
 
 ### Client → Server: `client/state` source object
 
@@ -1530,7 +1556,7 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 A `start` received while a start authorization is pending or the input stream is open has no effect: it MUST NOT restart the stream or authorize a later reopening. A `stop` received with no pending start authorization and no open input stream is ignored.
 
-A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` received while no input stream is open as a decline.
+A client MAY decline a pending start authorization: it clears the authorization and sends `client-stream/end` without opening an input stream. The server treats a `client-stream/end` that lists `source` or omits `roles`, received while no input stream is open, as a decline.
 
 The server MUST NOT send `start` unless the source role is active, it has received the source object in the [`client/state`](#client--server-clientstate) update required by that activation, and the latest `client/state` it received reports `available: true`.
 
@@ -1550,9 +1576,9 @@ When the client receives a [`server/activate`](#server--client-serveractivate) r
 
 A source that becomes unavailable MUST clear any pending start authorization. If its input stream is open, it MUST stop sending source audio chunks and send `client-stream/end` before reporting [`available: false`](#external-source-handling) in `client/state`. The server treats the transition as an implicit `stop`.
 
-### Client → Server: `client-stream/start`
+### Client → Server: `client-stream/start` source object
 
-The `client-stream/start` message announces the active input stream format and provides any required codec header data.
+The `source` object in [`client-stream/start`](#client--server-client-streamstart) announces the active input stream format and provides any required codec header data. It has this structure:
 
 - `source`: object
   - `codec`: 'opus' | 'flac' | 'pcm'
@@ -1561,7 +1587,7 @@ The `client-stream/start` message announces the active input stream format and p
   - `bit_depth`: integer - ignored for `opus`
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
-A `client-stream/start` received while an input stream is already open replaces the stream format in place.
+A `client-stream/start` with a `source` object received while an input stream is already open replaces the stream format in place.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
@@ -1573,9 +1599,9 @@ A `client-stream/start` received while an input stream is already open replaces 
 
 `codec_header` uses standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included).
 
-### Client → Server: `client-stream/end`
+### Client → Server: `client-stream/end` source
 
-The client ends the current input stream. After sending this message, the client MUST NOT send another `client-stream/start` until it receives a new server `start`. Source audio MUST NOT resume before that `client-stream/start`.
+A [`client-stream/end`](#client--server-client-streamend) that lists `source` or omits `roles` ends the current input stream. After sending one, the client MUST NOT send another `client-stream/start` with a `source` object until it receives a new server `start`. Source audio MUST NOT resume before that `client-stream/start`.
 
 ### Client → Server: Source Audio Chunks (Binary)
 
@@ -1839,7 +1865,7 @@ The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthel
 - `visualizer@v1_support`: object
   - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting only each reassembled message's type byte, timestamp, and data
 
-The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` or `stream/end` resets this count. An in-place `stream/start` does not.
+The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` without `from_timestamp` or a `stream/end` resets this count. A `stream/clear` with `from_timestamp` removes only the messages it discards. An in-place `stream/start` does not.
 
 The requested data types, frame-rate cap, and spectrum configuration are dynamic and reported in the [`client/state`](#client--server-clientstate-visualizer-object) visualizer object.
 
@@ -1879,6 +1905,8 @@ When the `visualizer` object updates an active stream, frames sent before this m
 ### Server → Client: `stream/clear` visualizer
 
 When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients MUST clear all buffered visualization data and continue with data received after this message.
+
+When the message carries `from_timestamp`, clients MUST instead discard only the buffered messages whose timestamp is at or after `from_timestamp`, keep the earlier ones, and continue with data received after this message. Discarded messages count as never sent. Until the next `stream/clear`, messages sent after it MUST NOT have a timestamp earlier than `from_timestamp`.
 
 ### Server → Client: Visualization Data (Binary)
 
