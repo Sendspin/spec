@@ -356,7 +356,7 @@ Before sending messages or fields for a feature added by a future revision of th
 
 Noise authentication and the validation, direction, and sequencing rules for recognized messages still apply. An ID the receiver implements is still recognized when its role is inactive. An unrecognized value in a known field follows that field's rules, not the rule for ignoring unrecognized fields.
 
-**Out-of-range values.** A field value in a recognized message that is outside the range or length limit its definition gives is a protocol error: the receiver MUST close the connection. A field or message with its own rule for such a value follows that rule instead.
+**Out-of-range values.** A field value in a recognized message that is outside the fixed range or length limit its definition gives is a protocol error: the receiver MUST close the connection. A field or message with its own rule for such a value follows that rule instead.
 
 Message format example:
 
