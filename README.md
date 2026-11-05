@@ -445,7 +445,7 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
 
-A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
+A client whose `player` or `source` role is active MUST NOT send its initial `client/state` until its time filter has converged.
 
 ### Time filter
 
@@ -698,14 +698,14 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player or source reports `available: true` only after it has established [clock synchronization](#clock-synchronization). When a role that defines a state object becomes active in `active_roles`, the client MUST send an update that includes that role's object. The server MUST NOT send that role's binary data until it has received that object. For a role that defines no state object, the client's initial `client/state` opens its binary data instead. On reactivation, such roles use the latest reported `available` without requiring a new `client/state`.
+Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A client whose `player` or `source` role is active sends its initial `client/state` only after it has established [clock synchronization](#clock-synchronization). When a role that defines a state object becomes active in `active_roles`, the client MUST send an update that includes that role's object. The server MUST NOT send that role's binary data until it has received that object. For a role that defines no state object, the client's initial `client/state` opens its binary data instead. On reactivation, such roles use the latest reported `available` without requiring a new `client/state`.
 
 A client whose `active_roles` are non-empty sends the initial `client/state` even when none of its roles defines a state object.
 
 Every message MUST carry `available` and the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
 - `available`: boolean - whether the client is available to participate in Sendspin playback
-  - `true` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
+  - `true` - client is operational and ready to participate in playback
   - `false` - the client is in use by an external system and will not yield to Sendspin on request. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if the `player` role is active ([see player state object details](#client--server-clientstate-player-object))
 - `source?`: object - only if the `source` role is active ([see source state object details](#client--server-clientstate-source-object))
@@ -733,6 +733,8 @@ When a client reports `available: false`, it indicates the client is in use by a
 A client SHOULD report `available: false` only while it will not yield to Sendspin, and SHOULD return to `available: true` as soon as it is again willing to be taken over.
 
 #### Server behavior when a client becomes unavailable (`available: false`):
+
+A client becomes unavailable when it reports `available: false`, including in its initial `client/state`.
 
 If the client is in a multi-client group:
 1. Remember the client's current group as its "previous group" (see [switch command cycle](#switch-command-cycle))
