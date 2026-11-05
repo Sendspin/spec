@@ -357,9 +357,11 @@ Clients and servers MUST ignore JSON messages with an unrecognized `type`, provi
 
 During [re-handshake](#re-handshake), these ignore rules apply only to messages allowed by the re-handshake rules, including valid messages encrypted with the previous session keys and received by the server before Noise message 2.
 
-Before sending messages or fields for a feature added by a future revision of this specification, senders MUST confirm support through role activation or explicit capability negotiation. The feature's specified negotiation fields are exempt from this requirement. Optional informational fields added by this specification to existing messages are also exempt if older receivers can ignore them without changing the message's meaning. Not receiving an error does not prove that the receiver understood or acted on the message. Future revisions of this specification MAY define negotiation fields in existing messages that older receivers can ignore. See [Protocol evolution](#protocol-evolution).
+Before sending messages or fields for a feature added by a future revision of this specification, or a value outside a range or length limit an earlier revision defined, senders MUST confirm support through role activation or explicit capability negotiation. The feature's specified negotiation fields are exempt from this requirement. Optional informational fields added by this specification to existing messages are also exempt if older receivers can ignore them without changing the message's meaning. Not receiving an error does not prove that the receiver understood or acted on the message. Future revisions of this specification MAY define negotiation fields in existing messages that older receivers can ignore. See [Protocol evolution](#protocol-evolution).
 
 Noise authentication and the validation, direction, and sequencing rules for recognized messages still apply. An ID the receiver implements is still recognized when its role is inactive. An unrecognized value in a known field follows that field's rules, not the rule for ignoring unrecognized fields.
+
+**Out-of-range values.** A field value in a recognized message that is outside the fixed range or length limit its definition gives is a protocol error: the receiver MUST close the connection. A field or message with its own rule for such a value follows that rule instead.
 
 Message format example:
 
@@ -589,7 +591,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
-- `name`: string - friendly name of the server, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
+- `name`: string - friendly name of the server, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 - `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](#server--client-serverhello-sourcev1-support-object))
 
@@ -623,7 +625,7 @@ When a role version defines a support object, its key in `client/hello` or `serv
 
 If a role version requires a support object, the server MUST NOT activate that version when the object is missing from `client/hello`.
 
-A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST accept a `client/hello` within these limits and MAY close the connection on one that exceeds them.
+A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST NOT reject a `client/hello` for its depth or size within these limits and MAY close the connection on one that exceeds them.
 
 ### Server → Client: `server/activate`
 
@@ -673,9 +675,9 @@ When applying a `server/activate`, the client MUST:
 
 State for roles that remain active at the same version is unchanged.
 
-Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
+Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
 
-Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
+Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, leaving their values unvalidated, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
 ### Client → Server: `client/time`
 
@@ -804,7 +806,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
 
-On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start` and discard player audio and visualization data.
+On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start`, leaving their values unvalidated, and discard player audio and visualization data.
 
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
@@ -870,7 +872,7 @@ Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group. A paused group reports `'stopped'`
 - `group_id`: string - identifier of the group this client is part of. The identifier MUST NOT change while the group exists, but MAY change after a server restart
-- `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
+- `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
 
 ### Server → Client: `server/unpair`
 
@@ -1246,7 +1248,7 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or the [round limit](#rounds) holds it back. Sent immediately on receiving such a pairing [`server/activate`](#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state and any `message` to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
 
 - `pairing_index`: integer - see [Pairing index](#messages)
-- `message?`: string - a short [plain text](#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device and truncates it to that length
+- `message?`: string - a short [plain text](#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device
 
 #### Client → Server: `client/pair-init`
 
@@ -1380,13 +1382,13 @@ State updates MUST be sent whenever a field in the `player` state object changes
 
 **Supported commands:** `supported_commands` advertises settability, not reportability. It lists the commands the server MAY send, and a player MAY report `volume` or `muted` without offering the matching command: an amplifier with a physical volume knob reports the position it is set to but cannot be set remotely. Capability also cannot be inferred from field presence, since `output_delay_ms` is never optional, whether or not `set_output_delay` is offered. A server MUST NOT treat a reported `volume` or `muted` as settable while the matching command is absent from `supported_commands`, though it MAY still surface the reported value as read-only.
 
-**Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST clamp `output_delay_ms` to the range 0-5000. Clients MUST persist `output_delay_ms` locally across reboots and server reconnections. Clients MAY update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output. Decreasing `output_delay_ms` moves output later and can temporarily leave more audio buffered than `buffer_capacity`, because the server may already have sent audio using the previous delay. Clients MUST remain operational when handling this temporary excess. They MAY drop audio and resynchronize, and SHOULD avoid audible interruptions.
+**Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST persist `output_delay_ms` locally across reboots and server reconnections. Clients MAY update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output. Decreasing `output_delay_ms` moves output later and can temporarily leave more audio buffered than `buffer_capacity`, because the server may already have sent audio using the previous delay. Clients MUST remain operational when handling this temporary excess. They MAY drop audio and resynchronize, and SHOULD avoid audible interruptions.
 
 **Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
 
 **Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) without `from_timestamp` (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. While a stream is running, the reported value MUST be at least the most audio the client can have buffered in its audio backend (e.g., a driver or hardware buffer) that still plays after a [`stream/clear`](#server--client-streamclear-player). Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
 
-**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Receive timestamps](#receive-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. Players MUST clamp `min_buffer_ms` to the range 0-5000. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
+**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Receive timestamps](#receive-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
 **Format preference:** When `format` changes while a `player` stream is active, the server re-derives the stream format and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the preference applies to the next stream the server starts (see [`stream/start`](#server--client-streamstart)). Clients can use this to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -1727,8 +1729,8 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
   - `album_artist?`: string - album artist(s)
   - `album?`: string - name of the album or release that this track belongs to
   - `artwork_url?`: string - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
-  - `year?`: integer - release year in YYYY format
-  - `track?`: integer - track number on the album (1-indexed), absent if unknown or not applicable
+  - `year?`: integer - release year (e.g., 2024)
+  - `track?`: integer - track number on the album, at least 1, absent if unknown or not applicable
   - `progress?`: object - playback progress information. Omitting it clears the client's position, so include it in every `metadata` state that has a position to report. The server MUST send a new `metadata` state whenever playback state changes (play, pause, resume, seek, playback speed change), unless the change was already conveyed by a scheduled update
     - `track_progress`: integer - playback position in milliseconds since start of track, measured at `timestamp`
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
@@ -1779,7 +1781,7 @@ The `artwork` object in [`client/state`](#client--server-clientstate) has this s
     - `width?`: integer - width in pixels of the delivered image. Required unless `source` is `'none'`
     - `height?`: integer - height in pixels of the delivered image. Required unless `source` is `'none'`
 
-The `channels` array is positional from channel 0 (length 1-4). A channel index the array does not cover is `source: 'none'`, so a client MAY truncate the array after its last active channel. An `artwork` object whose `channels` array is longer than 4 is a protocol error; the server SHOULD close the connection.
+The `channels` array is positional from channel 0 (length 1-4). A channel index the array does not cover is `source: 'none'`, so a client MAY truncate the array after its last active channel, keeping at least one entry.
 
 **Note:** Clients can use 1-4 independent artwork channels depending on their display capabilities. Channel 0 uses binary message type 8, channel 1 uses type 9, etc.
 
