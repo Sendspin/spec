@@ -871,7 +871,7 @@ The server MUST promptly send this message after the first `server/activate` on 
 Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group. A paused group reports `'stopped'`
-- `group_id`: string - identifier of the group this client is part of: 32 bytes chosen by the server, base64url-encoded without padding (43 characters). A value that is not 43 base64url characters is a protocol error; the client SHOULD close the connection. The identifier MUST NOT change while the group exists, but MAY change after a server restart
+- `group_id`: string - identifier of the group this client is part of: 32 bytes chosen by the server, base64url-encoded without padding (43 characters). A value that is not 43 base64url characters is a protocol error: the client MUST close the connection. The identifier MUST NOT change while the group exists, but MAY change after a server restart
 - `group_name`: string - friendly name of the group, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
 
 ### Server → Client: `server/unpair`
