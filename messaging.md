@@ -31,9 +31,11 @@ Clients and servers MUST ignore JSON messages with an unrecognized `type`, provi
 
 During [re-handshake](connection.md#re-handshake), these ignore rules apply only to messages allowed by the re-handshake rules, including valid messages encrypted with the previous session keys and received by the server before Noise message 2.
 
-Before sending messages or fields for a feature added by a future revision of this specification, senders MUST confirm support through role activation or explicit capability negotiation. The feature's specified negotiation fields are exempt from this requirement. Optional informational fields added by this specification to existing messages are also exempt if older receivers can ignore them without changing the message's meaning. Not receiving an error does not prove that the receiver understood or acted on the message. Future revisions of this specification MAY define negotiation fields in existing messages that older receivers can ignore. See [Protocol evolution](README.md#protocol-evolution).
+Before sending messages or fields for a feature added by a future revision of this specification, or a value outside a range or length limit an earlier revision defined, senders MUST confirm support through role activation or explicit capability negotiation. The feature's specified negotiation fields are exempt from this requirement. Optional informational fields added by this specification to existing messages are also exempt if older receivers can ignore them without changing the message's meaning. Not receiving an error does not prove that the receiver understood or acted on the message. Future revisions of this specification MAY define negotiation fields in existing messages that older receivers can ignore. See [Protocol evolution](README.md#protocol-evolution).
 
 Noise authentication and the validation, direction, and sequencing rules for recognized messages still apply. An ID the receiver implements is still recognized when its role is inactive. An unrecognized value in a known field follows that field's rules, not the rule for ignoring unrecognized fields.
+
+**Out-of-range values.** A field value in a recognized message that is outside the fixed range or length limit its definition gives is a protocol error: the receiver MUST close the connection. A field or message with its own rule for such a value follows that rule instead.
 
 Message format example:
 
@@ -119,7 +121,7 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
 
-A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
+A client whose `player` or `source` role is active MUST NOT send its initial `client/state` until its time filter has converged.
 
 ### Time filter
 
@@ -263,7 +265,7 @@ Sent by the server in place of [`server/init`](#server--client-serverinit) when 
 
 First message sent by the server after the initial Noise handshake completes. Sent once per connection as an encrypted message (binary message, message type `0`).
 
-- `name`: string - friendly name of the server, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
+- `name`: string - friendly name of the server, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 - `source@v1_support?`: object - required if the server supports the `source@v1` role, absent otherwise ([see server-side source@v1 support object details](roles/source/v1.md#server--client-serverhello-sourcev1-support-object))
 
@@ -297,7 +299,7 @@ When a role version defines a support object, its key in `client/hello` or `serv
 
 If a role version requires a support object, the server MUST NOT activate that version when the object is missing from `client/hello`.
 
-A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST accept a `client/hello` within these limits and MAY close the connection on one that exceeds them.
+A `client/hello` MUST NOT nest deeper than 10 levels, where the root object is level 1 and each nested object or array adds one, and MUST NOT exceed 16384 bytes of UTF-8 JSON. Servers MUST NOT reject a `client/hello` for its depth or size within these limits and MAY close the connection on one that exceeds them.
 
 ### Server → Client: `server/activate`
 
@@ -331,13 +333,13 @@ When `'pairing'` is in `activities`, `pairing.method` MUST be `'pairing_psk'` if
 
 **Worked example (`pairing_required`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`.
 
-Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
+Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation. A server SHOULD declare `'playback'` while the client's group is playing or while it wants the client's `source` to stream, whatever roles are active, and drop it once neither is the case, not at a track change or while the client moves to another playing group.
 
 Servers normally activate the client's [preferred](README.md#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
 Role removal includes explicit removal from `active_roles`, implicit removal when the connection is no longer playback-capable, and replacement of an active role version.
 
-Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role, the server MUST send any required `stream/end` before starting the re-handshake.
+Before a `server/activate` removes a server-to-client stream role (`player`, `artwork`, `visualizer`, or an application-specific role with such a stream), the server MUST send [`stream/end`](#server--client-streamend) for that role if its stream is active. Before a `server/activate` drops `'playback'` from `activities`, the server MUST send `stream/end` for the `player` and `visualizer` streams if they are active. If the first activation after a [re-handshake](connection.md#re-handshake) will remove such a role or drop `'playback'`, the server MUST send any required `stream/end` before starting the re-handshake.
 
 When applying a `server/activate`, the client MUST:
 
@@ -347,9 +349,9 @@ When applying a `server/activate`, the client MUST:
 
 State for roles that remain active at the same version is unchanged.
 
-Servers MUST ignore inactive-role objects in `client/state` and `client/command` without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
+Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
 
-Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
+Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, leaving their values unvalidated, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
 
 ### Client → Server: `client/time`
 
@@ -372,14 +374,14 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player or source reports `available: true` only after it has established [clock synchronization](#clock-synchronization). When a role that defines a state object becomes active in `active_roles`, the client MUST send an update that includes that role's object. The server MUST NOT send that role's binary data until it has received that object. For a role that defines no state object, the client's initial `client/state` opens its binary data instead. On reactivation, such roles use the latest reported `available` without requiring a new `client/state`.
+Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A client whose `player` or `source` role is active sends its initial `client/state` only after it has established [clock synchronization](#clock-synchronization). When a role that defines a state object becomes active in `active_roles`, the client MUST send an update that includes that role's object. The server MUST NOT send that role's binary data until it has received that object. For a role that defines no state object, the client's initial `client/state` opens its binary data instead. On reactivation, such roles use the latest reported `available` without requiring a new `client/state`.
 
 A client whose `active_roles` are non-empty sends the initial `client/state` even when none of its roles defines a state object.
 
 Every message MUST carry `available` and the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
 - `available`: boolean - whether the client is available to participate in Sendspin playback
-  - `true` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
+  - `true` - client is operational and ready to participate in playback
   - `false` - the client is in use by an external system and will not yield to Sendspin on request. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if the `player` role is active ([see player state object details](roles/player/v1.md#client--server-clientstate-player-object))
 - `source?`: object - only if the `source` role is active ([see source state object details](roles/source/v1.md#client--server-clientstate-source-object))
@@ -407,6 +409,8 @@ When a client reports `available: false`, it indicates the client is in use by a
 A client SHOULD report `available: false` only while it will not yield to Sendspin, and SHOULD return to `available: true` as soon as it is again willing to be taken over.
 
 #### Server behavior when a client becomes unavailable (`available: false`):
+
+A client becomes unavailable when it reports `available: false`, including in its initial `client/state`.
 
 If the client is in a multi-client group:
 1. Remember the client's current group as its "previous group" (see [switch command cycle](roles/controller/v1.md#switch-command-cycle))
@@ -474,7 +478,9 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 [Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
 
-The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`.
+The server MUST NOT send `stream/start` unless the latest [`client/state`](#client--server-clientstate) it has received reports `available: true`, and MUST NOT include the `player` or `visualizer` object unless `'playback'` is in the connection's `activities`.
+
+On a connection without `'playback'`, the client MUST ignore the `player` and `visualizer` objects in `stream/start`, leaving their values unvalidated, and discard player audio and visualization data.
 
 Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role that defines a `client/state` object is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
 
@@ -540,7 +546,7 @@ Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group. A paused group reports `'stopped'`
 - `group_id`: string - identifier of the group this client is part of: 32 bytes chosen by the server, base64url-encoded without padding (43 characters). A value that is not 43 base64url characters is a protocol error; the client SHOULD close the connection. The identifier MUST NOT change while the group exists, but MAY change after a server restart
-- `group_name`: string - friendly name of the group, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8. A client truncates a longer one to 64 bytes at a UTF-8 character boundary
+- `group_name`: string - friendly name of the group, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
 
 ### Server → Client: `server/unpair`
 
