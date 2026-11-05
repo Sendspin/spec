@@ -1571,7 +1571,7 @@ A client MUST ignore `start` received while it is unavailable or while `'playbac
 
 #### Default streaming behavior
 
-The default after the handshake is `stop`: a source MUST NOT stream until it receives `command: "start"` from the server. The server is the only party that initiates streaming. A `client-stream/start` that opens an input stream without a corresponding server `start` is a protocol error: the server MUST NOT treat the input stream as open and SHOULD close the connection.
+The default after the handshake is `stop`: a source MUST NOT stream until it receives `command: "start"` from the server. The server is the only party that initiates streaming. A `client-stream/start` that opens an input stream without a corresponding server `start` is a protocol error: the server MUST close the connection.
 
 Servers MUST NOT treat an otherwise valid `client-stream/start` as unsolicited solely because the corresponding `start` was sent before the server received the preceding `client-stream/end` or availability update. The command may have reached the client after that transition.
 
@@ -1891,7 +1891,7 @@ The `visualizer` object in [`client/state`](#client--server-clientstate) has thi
 
 When this configuration changes while a `visualizer` stream is active, the server re-derives the stream configuration and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the configuration applies to the next stream the server starts.
 
-A `visualizer` object whose `types` include `'spectrum'` without a `spectrum` object is a protocol error; the server SHOULD close the connection.
+A `visualizer` object whose `types` include `'spectrum'` without a `spectrum` object is a protocol error: the server MUST close the connection.
 
 ### Server → Client: `stream/start` visualizer object
 
