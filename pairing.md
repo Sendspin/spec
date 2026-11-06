@@ -333,7 +333,7 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or the [round limit](#rounds) holds it back. Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state and any `message` to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
 
 - `pairing_index`: integer - see [Pairing index](#messages)
-- `message?`: string - a short [plain text](README.md#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](messaging.md#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device and truncates it to that length
+- `message?`: string - a short [plain text](README.md#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](messaging.md#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device
 
 #### Client → Server: `client/pair-init`
 
@@ -404,7 +404,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 
 - `reason`: string - one of:
   - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
-  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client does not admit a pairing connection alongside its current admitted connection (see [Multiple servers](connection.md#multiple-servers-server-initiated))
+  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client rejected or displaced this pairing (see [Multiple servers](connection.md#multiple-servers-server-initiated))
   - `method_not_supported` (client) - the server's activity set and `pairing.method` are not a permitted combination for the matched PSK, or `pairing.method` names a method the client does not currently offer, or `pairing.format` names an emission format the client does not currently offer
   - `pairing_code_mismatch` (client or server) - PAKE key-confirmation failed
   - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
