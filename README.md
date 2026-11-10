@@ -675,9 +675,9 @@ When applying a `server/activate`, the client MUST:
 
 State for roles that remain active at the same version is unchanged.
 
-Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned to an inactive role. Client-level fields and objects for active roles are processed normally.
+Servers MUST ignore inactive-role objects in `client/state` and `client/command`, leaving their values unvalidated, without closing solely for their presence, since the client may not yet have received the role removal. Servers MUST discard binary messages whose ID is assigned only to inactive roles. Client-level fields and objects for active roles are processed normally.
 
-Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, leaving their values unvalidated, and MUST discard binary messages whose ID is assigned to an inactive role. Other fields and objects for active roles are processed normally.
+Clients MUST ignore inactive-role objects in `stream/start`, `server/state`, and `server/command`, leaving their values unvalidated, and MUST discard binary messages whose ID is assigned only to inactive roles. Other fields and objects for active roles are processed normally.
 
 ### Client → Server: `client/time`
 
