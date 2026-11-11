@@ -1724,11 +1724,11 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
 
 - `metadata`: object
   - `timestamp`: integer - server clock time in microseconds at which this metadata takes effect, and the point [progress extrapolation](#calculating-current-track-position) runs from. A past or present timestamp describes the currently playing audio; a future timestamp schedules the update (see [Scheduled metadata updates](#scheduled-metadata-updates))
-  - `title?`: string - track title
-  - `artist?`: string - primary artist(s)
-  - `album_artist?`: string - album artist(s)
-  - `album?`: string - name of the album or release that this track belongs to
-  - `artwork_url?`: string - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
+  - `title?`: string - track title. MUST be at most 255 bytes in UTF-8
+  - `artist?`: string - primary artist(s). MUST be at most 255 bytes in UTF-8
+  - `album_artist?`: string - album artist(s). MUST be at most 255 bytes in UTF-8
+  - `album?`: string - name of the album or release that this track belongs to. MUST be at most 255 bytes in UTF-8
+  - `artwork_url?`: string - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves. MUST be at most 2048 bytes in UTF-8
   - `year?`: integer - release year (e.g., 2024)
   - `track?`: integer - track number on the album, at least 1, absent if unknown or not applicable
   - `progress?`: object - playback progress information. Omitting it clears the client's position, so include it in every `metadata` state that has a position to report. The server MUST send a new `metadata` state whenever playback state changes (play, pause, resume, seek, playback speed change), unless the change was already conveyed by a scheduled update
