@@ -1454,7 +1454,7 @@ This section defines rules that require all implementations to provide a good ex
 
 ### Correction Quality
 
-- **Steady state:** Playback is in steady state from 10 seconds after the last disturbance. Disturbances are startup, a [`stream/start`](#server--client-streamstart) that begins buffering from empty, a [`stream/clear`](#server--client-streamclear) without `from_timestamp`, recovery from a buffer underrun, a change to [`output_delay_ms`](#client--server-clientstate-player-object), a change of the audio output device or its latency, and a time filter update that moves the [error](#sync-accuracy) outside ±1 ms.
+- **Steady state:** Playback is in steady state from 10 seconds after the last disturbance. Disturbances are a new connection, a [`stream/start`](#server--client-streamstart) that begins buffering from empty, a [`stream/clear`](#server--client-streamclear) without `from_timestamp`, recovery from a buffer underrun, a change to [`output_delay_ms`](#client--server-clientstate-player-object), a change of the audio output device or its latency, and a time filter update that moves the [error](#sync-accuracy) outside ±1 ms.
 - **Inaudible corrections:** In steady state, individual corrections MUST NOT produce audible noise, warble, or distortion during normal listening.
 - **Maximum speed deviation:** The effective playback speed MUST stay within ±0.5% of normal speed, measured as a sliding average over 150 ms. This bounds continuous correction. A discrete one-shot resynchronization outside steady state is not a speed deviation and is exempt.
 
@@ -1516,7 +1516,7 @@ The player renders decoded frames at their server timestamps translated to local
 
 **Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
 
-**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear) without `from_timestamp`, or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration.
+**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on a new connection, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear) without `from_timestamp`, or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration.
 
 ## Source messages
 This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, report whether they have input audio to offer, and stream timestamped audio frames.
