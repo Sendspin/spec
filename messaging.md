@@ -115,13 +115,13 @@ The [ignore rules](#communication) also apply to fragmented messages. If the rec
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter). Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules. A server MAY drop a `client/time` request while its reply to an earlier `client/time` is still waiting to be sent.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Clients MUST send them in bursts, sending each message after the reply to the previous one arrives, and MUST feed the filter only the burst's measurement with the lowest [`max_error`](#time-filter) above 0. When a reply does not arrive within a timeout the client chooses, the client MAY send the next message without it. Each burst MUST contain at least 8 messages, and consecutive bursts MUST start no more than 10 seconds apart. Servers MUST NOT close the connection solely because a client's bursts break these rules. A server MAY drop a `client/time` request while its reply to an earlier `client/time` is still waiting to be sent.
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time filter](#time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. The [time-filter](https://github.com/Sendspin/time-filter) repository has a C++ reference implementation.
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (see [Receive timestamps](#receive-timestamps)). Clients feed these into the [time filter update](#time-filter-update) and use [`compute_client_time`](#time-conversion) to convert server timestamps to local clock values for playback scheduling.
 
-A client whose `player` or `source` role is active MUST NOT send its initial `client/state` until its time filter has converged.
+A client whose `player` or `source` role is active MUST NOT send its initial `client/state` until its time filter's `count` is at least 1.
 
 ### Time filter
 
