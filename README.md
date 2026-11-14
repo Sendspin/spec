@@ -929,7 +929,7 @@ A code-based pairing runs over a Sentinel-keyed connection: the channel is unaut
 
 The client reveals the new long-term PSK only after `server_kc` verifies, and only as `wrapped_psk` [sealed under the CPace output](#wrapping): a peer that cannot complete the PAKE - wrong pairing code, or a man in the middle relaying between two handshakes, whose differing `h` gives each leg a different `sid` - neither triggers the reveal nor can unwrap it.
 
-Static pairing methods (Pairing PSK, Static Pairing Code) do not use the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code. Where the out-channel is also a role's output, the client suspends that output locally for the duration of the attempt (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
+Static pairing methods (Pairing PSK, Static Pairing Code) do not use the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code.
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD offer `dynamic_pairing_code` rather than `static_pairing_code`, which is intended for devices without one. Clients whose display can render a QR code should also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
 
@@ -945,7 +945,7 @@ Eviction needs no wire signal. An evicted server's next handshake references a `
 
 ### Entering and leaving pairing
 
-Pairing can run alongside playback. A [`server/activate`](#server--client-serveractivate) that adds `'pairing'` to `activities` does not by itself affect `active_roles`, streams, or group membership. Where the pairing code's out-channel is also a role's output - the speaker playing the stream, the display showing artwork - the client suspends that output locally for the duration of the attempt, staying [`available`](#client--server-clientstate) throughout. Streams stay open and their timeline is unaffected: a player discards the audio scheduled during the attempt and afterwards resumes in sync.
+Pairing can run alongside playback. A [`server/activate`](#server--client-serveractivate) that adds `'pairing'` to `activities` does not by itself affect `active_roles`, streams, or group membership. Where a [pairing window](#pairing-window) holds server-driven output - the speaker playing the stream, the display showing artwork - the client suspends it locally, staying [`available`](#client--server-clientstate) throughout. Streams stay open and their timeline is unaffected: a player discards the audio scheduled during the hold and afterwards resumes in sync.
 
 Each pairing `server/activate` admits one **pairing attempt**, in progress from [`client/pair-init`](#client--server-clientpair-init) until success or [`pair/abort`](#client--server-pairabort). [`client/pair-pending`](#client--server-clientpair-pending) precedes an attempt and does not start it. The client bounds each attempt with an **attempt timeout** measured from its first message (recommended 2 minutes); on expiry it sends `pair/abort` with reason `attempt_timeout`.
 
@@ -1146,7 +1146,7 @@ sequenceDiagram
 
 ### Pairing Window
 
-A **pairing window** is a state in which the client has decided to accept pairing attempts. The window admits attempts only on the connection that carries its first, and closes on a completed pairing, cancellation by an operator gesture on the client, or window-lifetime expiry. It is exhausted after its fifth failed attempt (the client's verification of `server_kc` fails) in the Static Pairing Code Flow or at the [round limit](#rounds) in the Dynamic Pairing Code Flow: it stays open but admits no further attempts. Drop of its connection frees it for another connection's first attempt. An attempt that ends any other way - timed out or cancelled - neither closes nor exhausts the window.
+A **pairing window** is a state in which the client has decided to accept pairing attempts. The window admits attempts only on the connection that carries its first, and closes on a completed pairing, cancellation by an operator gesture on the client, or window-lifetime expiry. It is exhausted after its fifth failed attempt (the client's verification of `server_kc` fails) in the Static Pairing Code Flow or at the [round limit](#rounds) in the Dynamic Pairing Code Flow: it stays open but admits no further attempts. Drop of its connection frees an unexhausted window for another connection's first attempt. An attempt that ends any other way - timed out or cancelled - neither closes nor exhausts the window.
 
 An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` and `dynamic_pairing_code` attempt.
 
@@ -1155,7 +1155,7 @@ Pairing Window mechanics:
 - **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, an action taken through a surface no server can drive, or any equivalent implementation-defined action. Gestures SHOULD be deliberate and hard to induce remotely.
 - **Window lifetime.** From window opening, without pausing during attempts. Recommended 5 minutes. On expiry, the window closes silently. An attempt already in progress runs to its own end, but starting another requires a new pairing window.
 - **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](#server--client-serveractivate) has arrived; while a gesture is awaited it signals [`client/pair-pending`](#client--server-clientpair-pending), optionally naming the gesture in `message`. The server MUST NOT send [`server/pair-auth`](#server--client-serverpair-auth) or [`server/pair-init`](#server--client-serverpair-init) until it has received `client/pair-init`.
-- **Out-channel hold.** A client that offers `dynamic_pairing_code` MUST suspend all server-driven output on every out-channel, not only the emitting one, while a window is open or an attempt it gates is in progress, emitting nothing but pairing state: the code during a dynamic attempt, otherwise that it is waiting (see [Forged emission](#dynamic-pairing-code-flow)).
+- **Out-channel hold.** A client that offers `dynamic_pairing_code` MUST suspend all server-driven output, not only on the emitting out-channel, while a window is open or an attempt it gates is in progress, emitting nothing but pairing state: the code during a dynamic attempt, otherwise its pairing state, such as that it is waiting (see [Forged emission](#dynamic-pairing-code-flow)).
 
 ### Pairing Code Presentation
 
