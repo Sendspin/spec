@@ -40,7 +40,7 @@ The same `server/activate` can also end a pairing attempt without finalizing: se
 
 After sending `pair/abort` or leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the abort or leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
-A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt does not count against a [pairing window](#pairing-window), and counts toward the [round limit](#rounds) only when the code was already being emitted. A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for [`client/pair-init`](#client--server-clientpair-init), cancelling as above on expiry.
+A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt does not count against a [pairing window](#pairing-window), and its rounds count toward the [round limit](#rounds) only when the code was already being emitted. A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for [`client/pair-init`](#client--server-clientpair-init), cancelling as above on expiry.
 
 ### Unpaired Access
 
@@ -102,7 +102,7 @@ SP:0AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO
 
 ### Dynamic Pairing Code Flow
 
-Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel, in one of two **emission formats** (the activation's [`format`](messaging.md#server--client-serveractivate)): `digits` - a decimal code the operator types into the server - or `qr_code` - a code rendered as a QR code that the operator scans into the server. Either way, a [PAKE](#pake) round authenticates both sides. An attempt may be [held back](#rounds) before it starts.
+Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel, in one of two **emission formats** (the activation's [`format`](messaging.md#server--client-serveractivate)): `digits` - a decimal code the operator types into the server - or `qr_code` - a code rendered as a QR code that the operator scans into the server. Either way, a [PAKE](#pake) round authenticates both sides. Every attempt is gesture-gated by a [pairing window](#pairing-window).
 
 ```mermaid
 sequenceDiagram
@@ -115,9 +115,9 @@ sequenceDiagram
     Client->>Server: client/hello (supported_pair_methods)
     Note over Server: Operator picks dynamic pairing code
     Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code, format: digits|qr_code})
-    opt attempt held back
+    opt no window open
         Client->>Server: client/pair-pending
-        Note over Client: Cooldown elapses or operator acts
+        Note over Client: Operator opens pairing window
     end
     Client->>Server: client/pair-init (commit_B)
     loop until server_kc verifies
@@ -168,7 +168,7 @@ The reference vector for `code = 0xe0 0xe1 … 0xf7`:
 SP:14DQ6FY7E4XTOP9HJ5LV6Z3PO57YPD4XT6T97N5Y
 ```
 
-**Forged emission.** The code authenticates the client only if the operator obtains it from the client's own pairing logic. Any server the client admits - [unpaired](#unpaired-access) or paired - can drive the same display or speaker through a role, so an attacker between the two can run the pairing itself and have the client show or speak the attacker's code as artwork or audio; the operator enters it, and the server pairs with the attacker. The client MUST therefore emit the code only where no server can forge it: through an out-channel no server can drive, or through one a server can drive only during an attempt that a [pairing window](#pairing-window) gates. While such a window is open, or an attempt it gates is in progress, the client MUST suspend all server-driven output on every out-channel, not only the emitting one, and emit nothing but pairing state - the code during an attempt, otherwise that it is waiting. The server cannot tell whether the client it talks to is the device the operator looks at, so for every dynamic attempt it MUST instruct the operator to trigger pairing on the device before reading the code, and that a code the device shows without that is not to be trusted.
+**Forged emission.** The code authenticates the client only if the operator obtains it from the client's own pairing logic. Any server the client admits - [unpaired](#unpaired-access) or paired - can drive the same display or speaker through a role, so an attacker between the two can run the pairing itself and have the client show or speak the attacker's code as artwork or audio; the operator enters it, and the server pairs with the attacker. The client MUST therefore emit the code only during an attempt that a [pairing window](#pairing-window) gates, which holds its out-channels. The server cannot tell whether the client it talks to is the device the operator looks at, so for every dynamic attempt it MUST instruct the operator to trigger pairing on the device before reading the code, and that a code the device shows without that is not to be trusted.
 
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client answers with [`client/pair-retry`](#client--server-clientpair-retry) or [`pair/abort`](#client--server-pairabort); see [Rounds](#rounds). The binding values, and so the pairing code, are unchanged across rounds: a client that displays it keeps showing it, and a client that speaks it speaks it again in each round.
 
@@ -184,7 +184,7 @@ A failed key confirmation results in [`pair/abort`](#client--server-pairabort) w
 
 An attempt runs **rounds** against the same pairing code. A round begins with [`server/pair-init`](#server--client-serverpair-init) and ends with the client's verification of `server_kc` from [`server/pair-confirm`](#server--client-serverpair-confirm), or with the attempt. Within it the client emits the code, the operator enters it, and a separate CPace run - fresh scalars, its own `sid` - follows. On a verified `server_kc` the client continues with [`client/pair-confirm`](#client--server-clientpair-confirm). On failure the client either sends [`client/pair-retry`](#client--server-clientpair-retry), asking for another round, or ends the attempt with [`pair/abort`](#client--server-pairabort) reason `pairing_code_mismatch`. The client SHOULD retry, and MUST abort instead at the round limit. A retry keeps the attempt, its pairing code, and its running [attempt timeout](#entering-and-leaving-pairing) in place; the server begins the next round with a new `server/pair-init`.
 
-After 20 rounds since its last verified `server_kc` - the **round limit** - the client MUST abort rather than retry and hold attempts back until a deliberate, manufacturer-defined operator action. A client MAY hold attempts back earlier - by a cooldown or by an operator action, including from the first attempt; the gesture that opens a [pairing window](#pairing-window) is such an action - and MAY likewise abort rather than retry short of the limit. Only a verified `server_kc` and an operator action that releases held-back attempts reset the count: the end of a cooldown or an operator action during an attempt does not. The count is not partitioned by `server_id` or source address.
+After 20 failed rounds within a [pairing window](#pairing-window) - the **round limit** - the client MUST abort rather than retry; the window is [exhausted](#pairing-window) and further attempts wait for a new one. A client MAY apply a lower limit, and MAY likewise abort rather than retry short of it.
 
 The limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending), optionally saying in `message` what it waits for.
 
@@ -231,15 +231,16 @@ sequenceDiagram
 
 ### Pairing Window
 
-A **pairing window** is a state in which the client has decided to accept pairing attempts. The window admits attempts only on the connection that carries its first, and closes on a completed pairing, cancellation by an operator gesture on the client, or window-lifetime expiry. In the Static Pairing Code Flow it also closes on its fifth failed attempt (the client's verification of `server_kc` fails) or drop of that connection. In the Dynamic Pairing Code Flow the [round limit](#rounds) bounds failures instead, and drop of that connection frees the window for another connection's first attempt. An attempt that ends any other way - timed out or cancelled - does not itself close the window.
+A **pairing window** is a state in which the client has decided to accept pairing attempts. The window admits attempts only on the connection that carries its first, and closes on a completed pairing, cancellation by an operator gesture on the client, or window-lifetime expiry. It is exhausted after its fifth failed attempt (the client's verification of `server_kc` fails) in the Static Pairing Code Flow or at the [round limit](#rounds) in the Dynamic Pairing Code Flow: it stays open but admits no further attempts. Drop of its connection frees it for another connection's first attempt. An attempt that ends any other way - timed out or cancelled - neither closes nor exhausts the window.
 
-An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` attempt, and for every `dynamic_pairing_code` attempt whose [emission](#dynamic-pairing-code-flow) requires a window.
+An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` and `dynamic_pairing_code` attempt.
 
 Pairing Window mechanics:
 
-- **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action. Gestures SHOULD be deliberate and hard to induce remotely.
+- **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, an action taken through a surface no server can drive, or any equivalent implementation-defined action. Gestures SHOULD be deliberate and hard to induce remotely.
 - **Window lifetime.** From window opening, without pausing during attempts. Recommended 5 minutes. On expiry, the window closes silently. An attempt already in progress runs to its own end, but starting another requires a new pairing window.
 - **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](messaging.md#server--client-serveractivate) has arrived; while a gesture is awaited it signals [`client/pair-pending`](#client--server-clientpair-pending), optionally naming the gesture in `message`. The server MUST NOT send [`server/pair-auth`](#server--client-serverpair-auth) or [`server/pair-init`](#server--client-serverpair-init) until it has received `client/pair-init`.
+- **Out-channel hold.** A client that offers `dynamic_pairing_code` MUST suspend all server-driven output on every out-channel, not only the emitting one, while a window is open or an attempt it gates is in progress, emitting nothing but pairing state: the code during a dynamic attempt, otherwise that it is waiting (see [Forged emission](#dynamic-pairing-code-flow)).
 
 ### Pairing Code Presentation
 
@@ -332,7 +333,7 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 
 #### Client → Server: `client/pair-pending`
 
-Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or the [round limit](#rounds) holds it back. Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state and any `message` to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
+Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or the open one is exhausted. Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state and any `message` to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)).
 
 - `pairing_index`: integer - see [Pairing index](#messages)
 - `message?`: string - a short [plain text](README.md#definitions) sentence for the operator, at most 200 bytes in UTF-8, such as what to do to proceed, preferably in one of the server's [`languages`](messaging.md#server--client-serverhello). It comes from an unauthenticated peer: the server shows it attributed to the device
