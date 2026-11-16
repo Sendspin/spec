@@ -1146,7 +1146,7 @@ sequenceDiagram
 
 ### Pairing Window
 
-A **pairing window** is a state in which the client has decided to accept pairing attempts. The window admits attempts only on the connection that carries its first, and closes on a completed pairing, cancellation by an operator gesture on the client, or window-lifetime expiry. It is exhausted after its fifth failed attempt (the client's verification of `server_kc` fails) in the Static Pairing Code Flow or at the [round limit](#rounds) in the Dynamic Pairing Code Flow: it stays open but admits no further attempts. Drop of its connection frees an unexhausted window for another connection's first attempt. An attempt that ends any other way - timed out or cancelled - neither closes nor exhausts the window.
+A **pairing window** is a state in which the client has decided to accept pairing attempts. The window admits attempts only on the connection that carries its first, and closes on a completed pairing, cancellation by an operator gesture on the client, window-lifetime expiry, or a new opening gesture. It is exhausted after its fifth failed attempt (the client's verification of `server_kc` fails) in the Static Pairing Code Flow or at the [round limit](#rounds) in the Dynamic Pairing Code Flow: it stays open but admits no further attempts. Drop of its connection frees an unexhausted window for another connection's first attempt. An attempt that ends any other way - timed out or cancelled - neither closes nor exhausts the window.
 
 An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` and `dynamic_pairing_code` attempt.
 
