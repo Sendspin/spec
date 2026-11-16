@@ -1539,11 +1539,13 @@ The `source@v1_support` object in [`server/hello`](#server--client-serverhello) 
 
 A source MUST ignore codec identifiers it does not recognize.
 
-Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that supports the `source@v1` role MUST list the codecs it accepts in the [`source@v1_support`](#server--client-serverhello-sourcev1-support-object) object of `server/hello`. A source MUST announce only a listed codec in `client-stream/start` and MUST be able to produce `flac` or `pcm`, so that every server can accept its input.
+Servers MUST accept `flac` and `pcm` input and MAY accept `opus`. A server that supports the `source@v1` role MUST list the codecs it accepts in the [`source@v1_support`](#server--client-serverhello-sourcev1-support-object) object of `server/hello`. A source MUST announce only a listed codec in `client-stream/start` and MUST be able to produce `flac` or `pcm`, so that it shares a codec with every server.
 
 **Note:** Opus is covered by third-party patents. Implementers that ship `opus` in a commercial product are responsible for any license fees that apply; the patent pool does not target open-source software distributed independently from a hardware device.
 
-A source announces its input format in [`client-stream/start`](#client--server-client-streamstart-source-object); beyond the server's codec list there is no negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept any channel count, sample rate, and bit depth a source announces.
+A source announces its input format in [`client-stream/start`](#client--server-client-streamstart-source-object); beyond the server's codec list there is no negotiation. Servers MUST accept `flac` and `pcm` at every combination of a `bit_depth` of 16 or 24, 1 or 2 `channels`, and a `sample_rate` of 16000, 44100, or 48000, and MAY accept other formats. A source SHOULD announce a format within this set.
+
+While the source role is active, a server that does not accept an announced format, including one announced to replace the format of an open input stream, MUST send `command: "stop"` with `unsupported_format: true`. A source that receives this `stop` MUST announce a format within this set in later `client-stream/start` messages, or decline the start if it cannot produce one. A server that still wants the input stream SHOULD send `command: "start"` again once it receives the `client-stream/end` that follows this `stop`, and SHOULD NOT do so after a second such `stop`.
 
 ### Client → Server: `client/state` source object
 
@@ -1558,6 +1560,7 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 - `source`: object
   - `command`: 'start' | 'stop'
+  - `unsupported_format?`: boolean - true if the server does not accept the announced format, only if `command` is `stop`
 
 #### Source command semantics
 
