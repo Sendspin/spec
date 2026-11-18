@@ -275,7 +275,7 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
+- `name`: string - friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8. A player can let servers change it with [`set_name`](roles/player/v1.md#server--client-servercommand-player-object)
 - `device_info?`: object - optional information about the device. Each string is [plain text](README.md#definitions) and MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name

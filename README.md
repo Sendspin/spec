@@ -601,7 +601,7 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client, [plain text](#definitions). MUST be at most 64 bytes in UTF-8
+- `name`: string - friendly name of the client, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. A player can let servers change it with [`set_name`](#server--client-servercommand-player-object)
 - `device_info?`: object - optional information about the device. Each string is [plain text](#definitions) and MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
@@ -1373,18 +1373,21 @@ State updates MUST be sent whenever a field in the `player` state object changes
   - `output_delay_ms`: integer - output delay in milliseconds (0-5000)
   - `required_lead_time_ms`: non-negative integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead, except for a `stream/clear` with `from_timestamp` (see [Server Audio Send Constraints](#server-audio-send-constraints)).
   - `min_buffer_ms`: non-negative integer - requested minimum ongoing buffer duration in milliseconds (0-5000) during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
-  - `supported_commands`: string[] - subset of: 'volume', 'mute', 'set_output_delay', empty when the player accepts no commands
+  - `supported_commands`: string[] - subset of: 'volume', 'mute', 'set_output_delay', 'set_name', empty when the player accepts no commands
   - `format?`: object - the format the player currently prefers, which MUST be one of the entries in [`supported_formats`](#client--server-clienthello-playerv1-support-object). Absent means no overridden preference. See [format-selection rules](#client--server-clienthello-playerv1-support-object).
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
     - `bit_depth`: integer - bit depth (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
+  - `name?`: string - friendly name of the client, [plain text](#definitions). MUST be at most 64 bytes in UTF-8. MUST be included if 'set_name' is in `supported_commands`
 
-**Supported commands:** `supported_commands` advertises settability, not reportability. It lists the commands the server MAY send, and a player MAY report `volume` or `muted` without offering the matching command: an amplifier with a physical volume knob reports the position it is set to but cannot be set remotely. Capability also cannot be inferred from field presence, since `output_delay_ms` is never optional, whether or not `set_output_delay` is offered. A server MUST NOT treat a reported `volume` or `muted` as settable while the matching command is absent from `supported_commands`, though it MAY still surface the reported value as read-only.
+**Supported commands:** `supported_commands` advertises settability, not reportability. It lists the commands the server MAY send, and a player MAY report `volume` or `muted` without offering the matching command: an amplifier with a physical volume knob reports the position it is set to but cannot be set remotely. Capability also cannot be inferred from field presence, since `output_delay_ms` is never optional, whether or not `set_output_delay` is offered. A server MUST NOT treat a reported `volume` or `muted` as settable while the matching command is absent from `supported_commands`, though it MAY still surface the reported value as read-only. Servers MUST ignore `supported_commands` entries they do not recognize.
 
 **Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST persist `output_delay_ms` locally across reboots and server reconnections. Clients MAY update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output. Decreasing `output_delay_ms` moves output later and can temporarily leave more audio buffered than `buffer_capacity`, because the server may already have sent audio using the previous delay. Clients MUST remain operational when handling this temporary excess. They MAY drop audio and resynchronize, and SHOULD avoid audible interruptions.
 
 **Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
+
+**Name:** `set_name` renames the client. The client MUST persist the new name across reboots and server reconnections and report it in `name`. The latest reported `name` replaces the `name` from [`client/hello`](#client--server-clienthello), and the client uses it from then on in `client/hello` and as its [mDNS TXT `name`](#server-initiated-connections).
 
 **Timing parameters:** Clients MAY update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) without `from_timestamp` (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. While a stream is running, the reported value MUST be at least the most audio the client can have buffered in its audio backend (e.g., a driver or hardware buffer) that still plays after a [`stream/clear`](#server--client-streamclear-player). Servers MUST factor in updated values for subsequent playback timing. Clients SHOULD debounce measurements locally before changing the reported timing parameters, updating them only after a shift in conditions appears sustained, not on transient fluctuations.
 
@@ -1399,10 +1402,11 @@ The `player` object in [`server/command`](#server--client-servercommand) has thi
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
-  - `command`: 'volume' | 'mute' | 'set_output_delay' - MUST be listed in `supported_commands` from the latest player state the server received in [`client/state`](#client--server-clientstate-player-object); commands absent from the client's current `supported_commands` are ignored by the client
+  - `command`: 'volume' | 'mute' | 'set_output_delay' | 'set_name' - MUST be listed in `supported_commands` from the latest player state the server received in [`client/state`](#client--server-clientstate-player-object); commands absent from the client's current `supported_commands` are ignored by the client
   - `volume?`: integer - volume range 0-100, required if `command` is `volume`, absent otherwise
   - `mute?`: boolean - true to mute, false to unmute, required if `command` is `mute`, absent otherwise
   - `output_delay_ms?`: integer - delay in milliseconds (0-5000), required if `command` is `set_output_delay`, absent otherwise
+  - `name?`: string - new friendly name of the client, [plain text](#definitions) of at most 64 bytes in UTF-8, required if `command` is `set_name`, absent otherwise
 
 The server MUST NOT send a player command to a client before that client has sent its initial [`client/state`](#client--server-clientstate).
 
