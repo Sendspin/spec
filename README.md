@@ -1493,8 +1493,8 @@ Several speakers MAY play the same channel, such as two subwoofers. A `channel` 
 - Plays to a multichannel group by putting its available members in one [group](#definitions). Leaving that group, through `available: false`, `client/leave` or `switch`, follows the same rules as for any client and does not remove a member from its multichannel group.
 - Sends each member a stream with one channel per entry of its `speakers`, carrying their channels in that order. A member with a single speaker MAY instead get a stream with more channels that all carry its channel.
 - Keeps the multichannel group while a member is disconnected or unavailable. When no available member plays a channel of the audio, the server MAY mix that channel into the channels of the other members, or send a member the stream it would get outside a multichannel group. For example, while one player of a stereo pair is away, the other plays both channels.
-- Removes a multichannel group by sending `clear_multichannel_group` to every member, and removes a single member the same way. A member that misses a change to its multichannel group while disconnected still reports the old values when it comes back, and the server SHOULD then send it the change.
-- Resolves members that report different names for the same `id`, such as after a rename one of them missed, by sending `set_multichannel_group` with the name it keeps to the members that differ.
+- Removes a multichannel group by sending `clear_multichannel_group` to every member, and removes a single member the same way. A member that misses a change to its multichannel group while disconnected still reports the old values when it comes back, and the server SHOULD then send it the change. A multichannel group whose members do not list these commands can only be changed on the device.
+- Treats members that report different names for the same `id`, such as after a rename one of them missed, as one multichannel group, and MAY show any of these names.
 
 ## Playback Synchronization
 
