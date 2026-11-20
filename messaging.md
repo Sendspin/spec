@@ -275,7 +275,7 @@ Sent by the client once it has received [`server/hello`](#server--client-serverh
 
 Clients that can output audio SHOULD have the role `player`.
 
-- `name`: string - friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8
+- `name`: string - friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8. A client can let servers change it with [`set_name`](#server--client-servercommand)
 - `device_info?`: object - optional information about the device. Each string is [plain text](README.md#definitions) and MUST be at most 64 bytes in UTF-8
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
@@ -378,11 +378,13 @@ Sent once the client is ready to report its operational status (`available`), an
 
 A client whose `active_roles` are non-empty sends the initial `client/state` even when none of its roles defines a state object.
 
-Every message MUST carry `available` and the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
+Every message MUST carry `available`, the client-level `supported_commands` and `name` if the client offers any client-level command, and the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
 - `available`: boolean - whether the client is available to participate in Sendspin playback
   - `true` - client is operational and ready to participate in playback
   - `false` - the client is in use by an external system and will not yield to Sendspin on request. See [External Source Handling](#external-source-handling)
+- `supported_commands?`: string[] - client-level commands the server MAY send in [`server/command`](#server--client-servercommand), subset of: 'set_name'. Absent when the client accepts none. Servers MUST ignore entries they do not recognize
+- `name?`: string - current friendly name of the client, [plain text](README.md#definitions). MUST be at most 64 bytes in UTF-8. MUST be included if 'set_name' is in `supported_commands`
 - `player?`: object - only if the `player` role is active ([see player state object details](roles/player/v1.md#client--server-clientstate-player-object))
 - `source?`: object - only if the `source` role is active ([see source state object details](roles/source/v1.md#client--server-clientstate-source-object))
 - `artwork?`: object - only if the `artwork` role is active ([see artwork state object details](roles/artwork/v1.md#client--server-clientstate-artwork-object))
@@ -460,12 +462,17 @@ The first `server/state` sent for a role on a connection, and the first after th
 
 ### Server → Client: `server/command`
 
-Server sends commands to the client. Contains role-specific command objects.
+Server sends commands to the client. Contains a client-level command object and role-specific command objects.
 
+- `client?`: object - a client-level command. The server MUST NOT send it on an [unpaired session](README.md#definitions), and the client ignores it there
+  - `command`: 'set_name' - MUST be listed in the client-level `supported_commands` from the latest [`client/state`](#client--server-clientstate) the server received; commands absent from the client's current `supported_commands` are ignored by the client
+  - `name?`: string - new friendly name of the client, [plain text](README.md#definitions) of at most 64 bytes in UTF-8, required if `command` is `set_name`, absent otherwise
 - `player?`: object - only if the `player` role is active ([see player command object details](roles/player/v1.md#server--client-servercommand-player-object))
 - `source?`: object - only if the `source` role is active ([see source command object details](roles/source/v1.md#server--client-servercommand-source-object))
 
 [Application-specific roles](README.md#application-specific-roles) MAY also include objects in this message (keys starting with `_`).
+
+**Name:** `set_name` renames the client. The client MUST persist the new name across reboots and server reconnections and report it in `name` on each of its connections. The latest reported `name` replaces the `name` from [`client/hello`](#client--server-clienthello), and the client uses it from then on in `client/hello` and as its [mDNS TXT `name`](connection.md#server-initiated-connections).
 
 ### Server → Client: `stream/start`
 
