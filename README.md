@@ -1345,17 +1345,6 @@ Servers MUST support `flac` at every combination of a `bit_depth` of 16 or 24, 1
 
 For each [`stream/start`](#server--client-streamstart) the server SHOULD select the [`format`](#client--server-clientstate-player-object) the player's state currently prefers when one is set and the server can produce it for the current track, and otherwise the highest-priority `supported_formats` entry it can produce. It MAY select a different entry when warranted, for example to match a track's native sample rate and avoid resampling or to apply an operator-configured format, and MAY switch formats on a later track by sending a new `stream/start`.
 
-**Channel order:** Channels are ordered as in FLAC ([RFC 9639 section 9.1.3](https://www.rfc-editor.org/rfc/rfc9639#section-9.1.3)) for every codec:
-
-- 1: mono
-- 2: left, right
-- 3: left, right, center
-- 4: front left, front right, back left, back right
-- 5: front left, front right, front center, back/surround left, back/surround right
-- 6: front left, front right, front center, LFE, back/surround left, back/surround right
-- 7: front left, front right, front center, LFE, back center, side left, side right
-- 8: front left, front right, front center, LFE, back left, back right, side left, side right
-
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
 **Codec framing:** Each binary audio chunk carries whole codec units; a unit never spans chunks. Per codec:
