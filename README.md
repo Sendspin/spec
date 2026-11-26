@@ -792,7 +792,7 @@ The first `server/state` sent for a role on a connection, and the first after th
 Server sends commands to the client. Contains a client-level command object and role-specific command objects.
 
 - `client?`: object - a client-level command
-  - `command`: 'set_name' - MUST be listed in `supported_commands` of the `client` object from the latest [`client/state`](#client--server-clientstate) the server received; commands absent from the client's current `supported_commands` are ignored by the client
+  - `command`: 'set_name' - MUST be listed in `supported_commands` from the latest `client` object the server received in [`client/state`](#client--server-clientstate); commands absent from the client's current `supported_commands` are ignored by the client
   - `name?`: string - new friendly name of the client, [plain text](#definitions) of at most 64 bytes in UTF-8, required if `command` is `set_name`, absent otherwise
 - `player?`: object - only if the `player` role is active ([see player command object details](#server--client-servercommand-player-object))
 - `source?`: object - only if the `source` role is active ([see source command object details](#server--client-servercommand-source-object))
