@@ -1554,6 +1554,31 @@ The `source` object in [`client/state`](#client--server-clientstate) has this st
 
 - `source`: object
   - `signal`: 'present' | 'absent' - whether the source currently has input audio to offer
+  - `metadata?`: object - what the input audio is, for a source that knows. Absent when the source has nothing to report. Each `client/state` carries the full `source` object, so omitting `metadata` clears any the server holds
+    - `timestamp`: integer - server clock time in microseconds at which `progress` was measured, converted from the local clock the way source audio chunk timestamps are
+    - `title?`: string - track title. MUST be at most 255 bytes in UTF-8
+    - `artist?`: string - primary artist(s). MUST be at most 255 bytes in UTF-8
+    - `album_artist?`: string - album artist(s). MUST be at most 255 bytes in UTF-8
+    - `album?`: string - name of the album or release that this track belongs to. MUST be at most 255 bytes in UTF-8
+    - `artwork_url?`: string - URL to artwork image, which the server fetches itself. MUST be at most 2048 bytes in UTF-8
+    - `year?`: integer - release year (e.g., 2024)
+    - `track?`: integer - track number on the album, at least 1, absent if unknown or not applicable
+    - `progress?`: object - playback position of the input audio, if the source knows it
+      - `track_progress`: integer - playback position in milliseconds since start of track, measured at `timestamp`
+      - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration
+      - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 0 = paused)
+
+`title`, `artist`, `album_artist` and `album` are [plain text](#definitions).
+
+#### Source metadata
+
+A source learns `metadata` from the device that feeds it, such as the track information a Bluetooth sender or a cast receiver reports, or from user configuration. A source that cannot know what its input carries, such as a plain analog line-in, omits it. A source MUST NOT invent `metadata` from the audio itself.
+
+The source sends a new `client/state` whenever `metadata` changes, including a change of playback state (play, pause, resume, seek, playback speed change). It SHOULD NOT send a `client/state` only to advance `track_progress`: the server extrapolates the position from `timestamp` and `progress` as a metadata client does, and a source SHOULD send an update only when that extrapolation would drift by more than one second. A source SHOULD NOT send more than one `client/state` per second for `metadata` changes alone.
+
+The server MAY show `metadata` for the input wherever it shows what is playing, and MAY forward it to the players the input is distributed to. It describes the audio the source is capturing, whether or not the input stream is open. A server that does not use it ignores it.
+
+`metadata` is informational: it does not change the meaning of `signal`, and a server MUST NOT treat a change of `metadata` as a hint to send `command: "start"` or `command: "stop"`.
 
 ### Server → Client: `server/command` source object
 
